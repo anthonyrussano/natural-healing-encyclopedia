@@ -1,14 +1,6 @@
+
 import { db } from '../db';
-import { 
-  naturalHealingItemsTable, 
-  naturalHealingItemTagsTable, 
-  naturalHealingItemPropertiesTable,
-  naturalHealingItemUsesTable,
-  categoriesTable, 
-  tagsTable,
-  propertiesTable,
-  usesTable
-} from '../db/schema';
+import { naturalHealingItemsTable, naturalHealingItemTagsTable, categoriesTable, tagsTable } from '../db/schema';
 import { eq } from 'drizzle-orm';
 import { type CreateNaturalHealingItemInput, type NaturalHealingItemWithRelations } from '../schema';
 
@@ -26,6 +18,13 @@ export const createNaturalHealingItem = async (input: CreateNaturalHealingItemIn
 
     // Verify all tags exist if provided
     if (input.tag_ids && input.tag_ids.length > 0) {
+      const existingTags = await db.select()
+        .from(tagsTable)
+        .where(eq(tagsTable.id, input.tag_ids[0])) // Start with first tag
+        .execute();
+
+      // Check all tag IDs exist
+      const foundTagIds = new Set();
       for (const tagId of input.tag_ids) {
         const tag = await db.select()
           .from(tagsTable)
@@ -34,32 +33,7 @@ export const createNaturalHealingItem = async (input: CreateNaturalHealingItemIn
         if (tag.length === 0) {
           throw new Error(`Tag with id ${tagId} not found`);
         }
-      }
-    }
-
-    // Verify all properties exist if provided
-    if (input.property_ids && input.property_ids.length > 0) {
-      for (const propertyId of input.property_ids) {
-        const property = await db.select()
-          .from(propertiesTable)
-          .where(eq(propertiesTable.id, propertyId))
-          .execute();
-        if (property.length === 0) {
-          throw new Error(`Property with id ${propertyId} not found`);
-        }
-      }
-    }
-
-    // Verify all uses exist if provided
-    if (input.use_ids && input.use_ids.length > 0) {
-      for (const useId of input.use_ids) {
-        const use = await db.select()
-          .from(usesTable)
-          .where(eq(usesTable.id, useId))
-          .execute();
-        if (use.length === 0) {
-          throw new Error(`Use with id ${useId} not found`);
-        }
+        foundTagIds.add(tagId);
       }
     }
 
@@ -68,6 +42,8 @@ export const createNaturalHealingItem = async (input: CreateNaturalHealingItemIn
       .values({
         name: input.name,
         description: input.description,
+        properties: input.properties,
+        uses: input.uses,
         potential_side_effects: input.potential_side_effects,
         image_url: input.image_url,
         category_id: input.category_id
@@ -89,35 +65,13 @@ export const createNaturalHealingItem = async (input: CreateNaturalHealingItemIn
         .execute();
     }
 
-    // Insert property associations if provided
-    if (input.property_ids && input.property_ids.length > 0) {
-      const propertyAssociations = input.property_ids.map(propertyId => ({
-        item_id: newItem.id,
-        property_id: propertyId
-      }));
-
-      await db.insert(naturalHealingItemPropertiesTable)
-        .values(propertyAssociations)
-        .execute();
-    }
-
-    // Insert use associations if provided
-    if (input.use_ids && input.use_ids.length > 0) {
-      const useAssociations = input.use_ids.map(useId => ({
-        item_id: newItem.id,
-        use_id: useId
-      }));
-
-      await db.insert(naturalHealingItemUsesTable)
-        .values(useAssociations)
-        .execute();
-    }
-
     // Fetch the complete item with relations
     const result = await db.select({
       id: naturalHealingItemsTable.id,
       name: naturalHealingItemsTable.name,
       description: naturalHealingItemsTable.description,
+      properties: naturalHealingItemsTable.properties,
+      uses: naturalHealingItemsTable.uses,
       potential_side_effects: naturalHealingItemsTable.potential_side_effects,
       image_url: naturalHealingItemsTable.image_url,
       category_id: naturalHealingItemsTable.category_id,
@@ -149,34 +103,8 @@ export const createNaturalHealingItem = async (input: CreateNaturalHealingItemIn
       .where(eq(naturalHealingItemTagsTable.item_id, newItem.id))
       .execute();
 
-    // Fetch associated properties
-    const propertyResults = await db.select({
-      id: propertiesTable.id,
-      name: propertiesTable.name,
-      source: propertiesTable.source,
-      created_at: propertiesTable.created_at
-    })
-      .from(propertiesTable)
-      .innerJoin(naturalHealingItemPropertiesTable, eq(propertiesTable.id, naturalHealingItemPropertiesTable.property_id))
-      .where(eq(naturalHealingItemPropertiesTable.item_id, newItem.id))
-      .execute();
-
-    // Fetch associated uses
-    const useResults = await db.select({
-      id: usesTable.id,
-      name: usesTable.name,
-      source: usesTable.source,
-      created_at: usesTable.created_at
-    })
-      .from(usesTable)
-      .innerJoin(naturalHealingItemUsesTable, eq(usesTable.id, naturalHealingItemUsesTable.use_id))
-      .where(eq(naturalHealingItemUsesTable.item_id, newItem.id))
-      .execute();
-
     return {
       ...itemWithCategory,
-      properties: propertyResults,
-      uses: useResults,
       tags: tagResults
     };
   } catch (error) {

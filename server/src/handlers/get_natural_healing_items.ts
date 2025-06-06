@@ -1,14 +1,6 @@
+
 import { db } from '../db';
-import { 
-  naturalHealingItemsTable, 
-  categoriesTable, 
-  naturalHealingItemTagsTable, 
-  naturalHealingItemPropertiesTable,
-  naturalHealingItemUsesTable,
-  tagsTable,
-  propertiesTable,
-  usesTable
-} from '../db/schema';
+import { naturalHealingItemsTable, categoriesTable, naturalHealingItemTagsTable, tagsTable } from '../db/schema';
 import { type NaturalHealingItemWithRelations } from '../schema';
 import { eq } from 'drizzle-orm';
 
@@ -26,18 +18,6 @@ export const getNaturalHealingItems = async (): Promise<NaturalHealingItemWithRe
       .innerJoin(tagsTable, eq(naturalHealingItemTagsTable.tag_id, tagsTable.id))
       .execute();
 
-    // Get all item-property relationships
-    const itemProperties = await db.select()
-      .from(naturalHealingItemPropertiesTable)
-      .innerJoin(propertiesTable, eq(naturalHealingItemPropertiesTable.property_id, propertiesTable.id))
-      .execute();
-
-    // Get all item-use relationships
-    const itemUses = await db.select()
-      .from(naturalHealingItemUsesTable)
-      .innerJoin(usesTable, eq(naturalHealingItemUsesTable.use_id, usesTable.id))
-      .execute();
-
     // Build the result with relations
     const result: NaturalHealingItemWithRelations[] = itemsWithCategories.map(row => {
       const item = row.natural_healing_items;
@@ -48,22 +28,12 @@ export const getNaturalHealingItems = async (): Promise<NaturalHealingItemWithRe
         .filter(tagRow => tagRow.natural_healing_item_tags.item_id === item.id)
         .map(tagRow => tagRow.tags);
 
-      // Find properties for this item
-      const itemPropertiesForThisItem = itemProperties
-        .filter(propertyRow => propertyRow.natural_healing_item_properties.item_id === item.id)
-        .map(propertyRow => propertyRow.properties);
-
-      // Find uses for this item
-      const itemUsesForThisItem = itemUses
-        .filter(useRow => useRow.natural_healing_item_uses.item_id === item.id)
-        .map(useRow => useRow.uses);
-
       return {
         id: item.id,
         name: item.name,
         description: item.description,
-        properties: itemPropertiesForThisItem,
-        uses: itemUsesForThisItem,
+        properties: item.properties,
+        uses: item.uses,
         potential_side_effects: item.potential_side_effects,
         image_url: item.image_url,
         category_id: item.category_id,

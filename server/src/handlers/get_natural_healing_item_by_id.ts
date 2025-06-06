@@ -1,14 +1,6 @@
+
 import { db } from '../db';
-import { 
-  naturalHealingItemsTable, 
-  categoriesTable, 
-  tagsTable, 
-  propertiesTable,
-  usesTable,
-  naturalHealingItemTagsTable,
-  naturalHealingItemPropertiesTable,
-  naturalHealingItemUsesTable
-} from '../db/schema';
+import { naturalHealingItemsTable, categoriesTable, tagsTable, naturalHealingItemTagsTable } from '../db/schema';
 import { type NaturalHealingItemWithRelations } from '../schema';
 import { eq } from 'drizzle-orm';
 
@@ -39,36 +31,12 @@ export const getNaturalHealingItemById = async (id: number): Promise<NaturalHeal
       .where(eq(naturalHealingItemTagsTable.item_id, id))
       .execute();
 
-    // Get the properties for this item
-    const propertyResults = await db.select({
-      id: propertiesTable.id,
-      name: propertiesTable.name,
-      source: propertiesTable.source,
-      created_at: propertiesTable.created_at
-    })
-      .from(propertiesTable)
-      .innerJoin(naturalHealingItemPropertiesTable, eq(propertiesTable.id, naturalHealingItemPropertiesTable.property_id))
-      .where(eq(naturalHealingItemPropertiesTable.item_id, id))
-      .execute();
-
-    // Get the uses for this item
-    const useResults = await db.select({
-      id: usesTable.id,
-      name: usesTable.name,
-      source: usesTable.source,
-      created_at: usesTable.created_at
-    })
-      .from(usesTable)
-      .innerJoin(naturalHealingItemUsesTable, eq(usesTable.id, naturalHealingItemUsesTable.use_id))
-      .where(eq(naturalHealingItemUsesTable.item_id, id))
-      .execute();
-
     return {
       id: itemData.natural_healing_items.id,
       name: itemData.natural_healing_items.name,
       description: itemData.natural_healing_items.description,
-      properties: propertyResults,
-      uses: useResults,
+      properties: itemData.natural_healing_items.properties,
+      uses: itemData.natural_healing_items.uses,
       potential_side_effects: itemData.natural_healing_items.potential_side_effects,
       image_url: itemData.natural_healing_items.image_url,
       category_id: itemData.natural_healing_items.category_id,

@@ -1,14 +1,6 @@
+
 import { db } from '../db';
-import { 
-  naturalHealingItemsTable, 
-  categoriesTable, 
-  naturalHealingItemTagsTable, 
-  naturalHealingItemPropertiesTable,
-  naturalHealingItemUsesTable,
-  tagsTable,
-  propertiesTable,
-  usesTable
-} from '../db/schema';
+import { naturalHealingItemsTable, categoriesTable, naturalHealingItemTagsTable, tagsTable } from '../db/schema';
 import { type NaturalHealingItemWithRelations } from '../schema';
 import { eq } from 'drizzle-orm';
 
@@ -19,6 +11,8 @@ export const getItemsByCategory = async (categoryId: number): Promise<NaturalHea
       id: naturalHealingItemsTable.id,
       name: naturalHealingItemsTable.name,
       description: naturalHealingItemsTable.description,
+      properties: naturalHealingItemsTable.properties,
+      uses: naturalHealingItemsTable.uses,
       potential_side_effects: naturalHealingItemsTable.potential_side_effects,
       image_url: naturalHealingItemsTable.image_url,
       category_id: naturalHealingItemsTable.category_id,
@@ -36,14 +30,20 @@ export const getItemsByCategory = async (categoryId: number): Promise<NaturalHea
     .where(eq(naturalHealingItemsTable.category_id, categoryId))
     .execute();
 
+    // Get tags for each item
     const itemIds = itemsWithCategory.map(item => item.id);
     
-    let itemTags: Array<{item_id: number; tag: any}> = [];
-    let itemProperties: Array<{item_id: number; property: any}> = [];
-    let itemUses: Array<{item_id: number; use: any}> = [];
+    let itemTags: Array<{
+      item_id: number;
+      tag: {
+        id: number;
+        name: string;
+        description: string | null;
+        created_at: Date;
+      };
+    }> = [];
 
     if (itemIds.length > 0) {
-      // Get all tags for these items
       itemTags = await db.select({
         item_id: naturalHealingItemTagsTable.item_id,
         tag: {
@@ -55,65 +55,43 @@ export const getItemsByCategory = async (categoryId: number): Promise<NaturalHea
       })
       .from(naturalHealingItemTagsTable)
       .innerJoin(tagsTable, eq(naturalHealingItemTagsTable.tag_id, tagsTable.id))
+      .where(eq(naturalHealingItemTagsTable.item_id, itemIds[0]))
       .execute();
 
-      // Get all properties for these items
-      itemProperties = await db.select({
-        item_id: naturalHealingItemPropertiesTable.item_id,
-        property: {
-          id: propertiesTable.id,
-          name: propertiesTable.name,
-          source: propertiesTable.source,
-          created_at: propertiesTable.created_at,
-        }
-      })
-      .from(naturalHealingItemPropertiesTable)
-      .innerJoin(propertiesTable, eq(naturalHealingItemPropertiesTable.property_id, propertiesTable.id))
-      .execute();
-
-      // Get all uses for these items
-      itemUses = await db.select({
-        item_id: naturalHealingItemUsesTable.item_id,
-        use: {
-          id: usesTable.id,
-          name: usesTable.name,
-          source: usesTable.source,
-          created_at: usesTable.created_at,
-        }
-      })
-      .from(naturalHealingItemUsesTable)
-      .innerJoin(usesTable, eq(naturalHealingItemUsesTable.use_id, usesTable.id))
-      .execute();
+      // Get tags for remaining items if there are more
+      for (let i = 1; i < itemIds.length; i++) {
+        const additionalTags = await db.select({
+          item_id: naturalHealingItemTagsTable.item_id,
+          tag: {
+            id: tagsTable.id,
+            name: tagsTable.name,
+            description: tagsTable.description,
+            created_at: tagsTable.created_at,
+          }
+        })
+        .from(naturalHealingItemTagsTable)
+        .innerJoin(tagsTable, eq(naturalHealingItemTagsTable.tag_id, tagsTable.id))
+        .where(eq(naturalHealingItemTagsTable.item_id, itemIds[i]))
+        .execute();
+        
+        itemTags.push(...additionalTags);
+      }
     }
 
-    // Group by item ID
+    // Group tags by item ID
     const tagsByItemId = itemTags.reduce((acc, { item_id, tag }) => {
-      if (!acc[item_id]) acc[item_id] = [];
+      if (!acc[item_id]) {
+        acc[item_id] = [];
+      }
       acc[item_id].push(tag);
       return acc;
-    }, {} as Record<number, any[]>);
+    }, {} as Record<number, typeof itemTags[0]['tag'][]>);
 
-    const propertiesByItemId = itemProperties.reduce((acc, { item_id, property }) => {
-      if (!acc[item_id]) acc[item_id] = [];
-      acc[item_id].push(property);
-      return acc;
-    }, {} as Record<number, any[]>);
-
-    const usesByItemId = itemUses.reduce((acc, { item_id, use }) => {
-      if (!acc[item_id]) acc[item_id] = [];
-      acc[item_id].push(use);
-      return acc;
-    }, {} as Record<number, any[]>);
-
-    // Filter items by category and combine with relations
-    return itemsWithCategory
-      .filter(item => item.category_id === categoryId)
-      .map(item => ({
-        ...item,
-        properties: propertiesByItemId[item.id] || [],
-        uses: usesByItemId[item.id] || [],
-        tags: tagsByItemId[item.id] || []
-      }));
+    // Combine items with their tags
+    return itemsWithCategory.map(item => ({
+      ...item,
+      tags: tagsByItemId[item.id] || []
+    }));
   } catch (error) {
     console.error('Get items by category failed:', error);
     throw error;
