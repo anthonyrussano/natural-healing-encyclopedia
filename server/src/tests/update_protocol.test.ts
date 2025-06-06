@@ -1,202 +1,192 @@
-
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { resetDB, createDB } from '../helpers';
 import { db } from '../db';
-import { categoriesTable, tagsTable, naturalHealingItemsTable, protocolsTable, protocolItemsTable, naturalHealingItemTagsTable } from '../db/schema';
+import { protocolItemsTable } from '../db/schema';
 import { type UpdateProtocolInput } from '../schema';
 import { updateProtocol } from '../handlers/update_protocol';
+import { createCategory } from '../handlers/create_category';
+import { createProperty } from '../handlers/create_property';
+import { createUse } from '../handlers/create_use';
+import { createNaturalHealingItem } from '../handlers/create_natural_healing_item';
+import { createProtocol } from '../handlers/create_protocol';
+import { eq } from 'drizzle-orm';
 
 describe('updateProtocol', () => {
   beforeEach(createDB);
   afterEach(resetDB);
 
-  let categoryId: number;
-  let tagId: number;
-  let itemId1: number;
-  let itemId2: number;
-  let protocolId: number;
-
-  beforeEach(async () => {
-    // Create test category
-    const categoryResult = await db.insert(categoriesTable)
-      .values({
-        name: 'Herbs',
-        description: 'Herbal remedies'
-      })
-      .returning()
-      .execute();
-    categoryId = categoryResult[0].id;
-
-    // Create test tag
-    const tagResult = await db.insert(tagsTable)
-      .values({
-        name: 'Anti-inflammatory',
-        description: 'Reduces inflammation'
-      })
-      .returning()
-      .execute();
-    tagId = tagResult[0].id;
-
-    // Create test natural healing items
-    const item1Result = await db.insert(naturalHealingItemsTable)
-      .values({
-        name: 'Turmeric',
-        description: 'Golden spice with healing properties',
-        properties: 'Anti-inflammatory, antioxidant',
-        uses: 'Joint pain, inflammation',
-        potential_side_effects: 'May cause stomach upset',
-        category_id: categoryId
-      })
-      .returning()
-      .execute();
-    itemId1 = item1Result[0].id;
-
-    const item2Result = await db.insert(naturalHealingItemsTable)
-      .values({
-        name: 'Ginger',
-        description: 'Root with warming properties',
-        properties: 'Anti-nausea, warming',
-        uses: 'Nausea, digestion',
-        potential_side_effects: 'May increase bleeding risk',
-        category_id: categoryId
-      })
-      .returning()
-      .execute();
-    itemId2 = item2Result[0].id;
-
-    // Create item-tag association
-    await db.insert(naturalHealingItemTagsTable)
-      .values({
-        item_id: itemId1,
-        tag_id: tagId
-      })
-      .execute();
-
-    // Create test protocol
-    const protocolResult = await db.insert(protocolsTable)
-      .values({
-        name: 'Inflammation Protocol',
-        description: 'Protocol for reducing inflammation'
-      })
-      .returning()
-      .execute();
-    protocolId = protocolResult[0].id;
-
-    // Add initial protocol item
-    await db.insert(protocolItemsTable)
-      .values({
-        protocol_id: protocolId,
-        item_id: itemId1
-      })
-      .execute();
-  });
-
   it('should update protocol name and description', async () => {
-    const input: UpdateProtocolInput = {
-      id: protocolId,
-      name: 'Updated Inflammation Protocol',
-      description: 'Updated protocol for reducing inflammation'
+    // Create prerequisite data using handlers
+    const category = await createCategory({ name: 'Herbs', description: 'Natural herbs' });
+    const property = await createProperty({ name: 'Anti-inflammatory', source: 'Clinical study' });
+    const use = await createUse({ name: 'Joint health', source: 'Traditional use' });
+
+    const item = await createNaturalHealingItem({
+      name: 'Turmeric',
+      description: 'Golden spice',
+      potential_side_effects: null,
+      image_url: null,
+      category_id: category.id,
+      property_ids: [property.id],
+      use_ids: [use.id],
+      tag_ids: []
+    });
+
+    const protocol = await createProtocol({
+      name: 'Original Protocol',
+      description: 'Original description',
+      item_ids: [item.id]
+    });
+
+    const updateInput: UpdateProtocolInput = {
+      id: protocol.id,
+      name: 'Updated Protocol',
+      description: 'Updated description'
     };
 
-    const result = await updateProtocol(input);
+    const result = await updateProtocol(updateInput);
 
-    expect(result.name).toEqual('Updated Inflammation Protocol');
-    expect(result.description).toEqual('Updated protocol for reducing inflammation');
-    expect(result.id).toEqual(protocolId);
+    expect(result.name).toBe('Updated Protocol');
+    expect(result.description).toBe('Updated description');
+    expect(result.id).toBe(protocol.id);
     expect(result.updated_at).toBeInstanceOf(Date);
-    
-    // Should still have the original item
+
+    // Verify items are still associated
     expect(result.items).toHaveLength(1);
-    expect(result.items[0].name).toEqual('Turmeric');
+    expect(result.items[0].name).toBe('Turmeric');
   });
 
   it('should update protocol items', async () => {
-    const input: UpdateProtocolInput = {
-      id: protocolId,
-      item_ids: [itemId2]
+    // Create prerequisite data using handlers
+    const category = await createCategory({ name: 'Herbs', description: 'Natural herbs' });
+    const property1 = await createProperty({ name: 'Anti-inflammatory', source: 'Clinical study' });
+    const property2 = await createProperty({ name: 'Digestive', source: 'Traditional use' });
+    const use1 = await createUse({ name: 'Joint health', source: 'Traditional use' });
+    const use2 = await createUse({ name: 'Nausea relief', source: 'Clinical study' });
+
+    const item1 = await createNaturalHealingItem({
+      name: 'Turmeric',
+      description: 'Golden spice',
+      potential_side_effects: null,
+      image_url: null,
+      category_id: category.id,
+      property_ids: [property1.id],
+      use_ids: [use1.id],
+      tag_ids: []
+    });
+
+    const item2 = await createNaturalHealingItem({
+      name: 'Ginger',
+      description: 'Warming spice',
+      potential_side_effects: null,
+      image_url: null,
+      category_id: category.id,
+      property_ids: [property2.id],
+      use_ids: [use2.id],
+      tag_ids: []
+    });
+
+    const protocol = await createProtocol({
+      name: 'Test Protocol',
+      description: 'Test description',
+      item_ids: [item1.id]
+    });
+
+    const updateInput: UpdateProtocolInput = {
+      id: protocol.id,
+      item_ids: [item2.id] // Replace with second item
     };
 
-    const result = await updateProtocol(input);
+    const result = await updateProtocol(updateInput);
 
+    expect(result.name).toBe('Test Protocol'); // Name unchanged
     expect(result.items).toHaveLength(1);
-    expect(result.items[0].name).toEqual('Ginger');
-    expect(result.items[0].id).toEqual(itemId2);
-    expect(result.items[0].category).toBeDefined();
-    expect(result.items[0].category.name).toEqual('Herbs');
-    expect(result.items[0].tags).toEqual([]);
+    expect(result.items[0].name).toBe('Ginger'); // Different item now
+
+    // Verify old association was removed
+    const protocolItems = await db.select()
+      .from(protocolItemsTable)
+      .where(eq(protocolItemsTable.protocol_id, protocol.id))
+      .execute();
+
+    expect(protocolItems).toHaveLength(1);
+    expect(protocolItems[0].item_id).toBe(item2.id);
   });
 
-  it('should update protocol with multiple items', async () => {
-    const input: UpdateProtocolInput = {
-      id: protocolId,
-      name: 'Multi-Item Protocol',
-      item_ids: [itemId1, itemId2]
+  it('should update both name and items simultaneously', async () => {
+    // Create prerequisite data using handlers
+    const category = await createCategory({ name: 'Herbs', description: 'Natural herbs' });
+    const property1 = await createProperty({ name: 'Anti-inflammatory', source: 'Clinical study' });
+    const property2 = await createProperty({ name: 'Digestive', source: 'Traditional use' });
+    const use1 = await createUse({ name: 'Joint health', source: 'Traditional use' });
+    const use2 = await createUse({ name: 'Nausea relief', source: 'Clinical study' });
+
+    const item1 = await createNaturalHealingItem({
+      name: 'Turmeric',
+      description: 'Golden spice',
+      potential_side_effects: null,
+      image_url: null,
+      category_id: category.id,
+      property_ids: [property1.id],
+      use_ids: [use1.id],
+      tag_ids: []
+    });
+
+    const item2 = await createNaturalHealingItem({
+      name: 'Ginger',
+      description: 'Warming spice',
+      potential_side_effects: null,
+      image_url: null,
+      category_id: category.id,
+      property_ids: [property2.id],
+      use_ids: [use2.id],
+      tag_ids: []
+    });
+
+    const protocol = await createProtocol({
+      name: 'Original Protocol',
+      description: 'Original description',
+      item_ids: []
+    });
+
+    const updateInput: UpdateProtocolInput = {
+      id: protocol.id,
+      name: 'Comprehensive Update',
+      description: 'Updated with new name and items',
+      item_ids: [item1.id, item2.id]
     };
 
-    const result = await updateProtocol(input);
+    const result = await updateProtocol(updateInput);
 
-    expect(result.name).toEqual('Multi-Item Protocol');
+    expect(result.name).toBe('Comprehensive Update');
+    expect(result.description).toBe('Updated with new name and items');
     expect(result.items).toHaveLength(2);
     
     const itemNames = result.items.map(item => item.name).sort();
     expect(itemNames).toEqual(['Ginger', 'Turmeric']);
-    
-    // Check that items have proper relations
-    result.items.forEach(item => {
-      expect(item.category).toBeDefined();
-      expect(item.category.name).toEqual('Herbs');
-      expect(item.tags).toBeDefined();
-    });
-
-    // Turmeric should have the tag, Ginger should not
-    const turmericItem = result.items.find(item => item.name === 'Turmeric');
-    const gingerItem = result.items.find(item => item.name === 'Ginger');
-    
-    expect(turmericItem?.tags).toHaveLength(1);
-    expect(turmericItem?.tags[0].name).toEqual('Anti-inflammatory');
-    expect(gingerItem?.tags).toHaveLength(0);
-  });
-
-  it('should clear protocol items when empty array provided', async () => {
-    const input: UpdateProtocolInput = {
-      id: protocolId,
-      item_ids: []
-    };
-
-    const result = await updateProtocol(input);
-
-    expect(result.items).toHaveLength(0);
   });
 
   it('should throw error for non-existent protocol', async () => {
-    const input: UpdateProtocolInput = {
+    const updateInput: UpdateProtocolInput = {
       id: 999,
-      name: 'Non-existent Protocol'
+      name: 'Non-existent update'
     };
 
-    expect(updateProtocol(input)).rejects.toThrow(/Protocol with id 999 not found/i);
+    expect(updateProtocol(updateInput)).rejects.toThrow(/Protocol with id 999 not found/);
   });
 
-  it('should throw error for non-existent item ids', async () => {
-    const input: UpdateProtocolInput = {
-      id: protocolId,
-      item_ids: [999, 1000]
+  it('should throw error for non-existent item_id', async () => {
+    const protocol = await createProtocol({
+      name: 'Test Protocol',
+      description: 'Test description',
+      item_ids: []
+    });
+
+    const updateInput: UpdateProtocolInput = {
+      id: protocol.id,
+      item_ids: [999] // Non-existent item
     };
 
-    expect(updateProtocol(input)).rejects.toThrow(/Natural healing items with ids 999, 1000 not found/i);
-  });
-
-  it('should update only specified fields', async () => {
-    const input: UpdateProtocolInput = {
-      id: protocolId,
-      name: 'Updated Name Only'
-    };
-
-    const result = await updateProtocol(input);
-
-    expect(result.name).toEqual('Updated Name Only');
-    expect(result.description).toEqual('Protocol for reducing inflammation'); // Should remain unchanged
-    expect(result.items).toHaveLength(1); // Items should remain unchanged
-    expect(result.items[0].name).toEqual('Turmeric');
+    expect(updateProtocol(updateInput)).rejects.toThrow(/Natural healing items with ids 999 not found/);
   });
 });

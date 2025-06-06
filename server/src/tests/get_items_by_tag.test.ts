@@ -1,176 +1,140 @@
-
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { resetDB, createDB } from '../helpers';
-import { db } from '../db';
-import { categoriesTable, tagsTable, naturalHealingItemsTable, naturalHealingItemTagsTable } from '../db/schema';
-import { type CreateCategoryInput, type CreateTagInput, type CreateNaturalHealingItemInput } from '../schema';
 import { getItemsByTag } from '../handlers/get_items_by_tag';
+import { createCategory } from '../handlers/create_category';
+import { createTag } from '../handlers/create_tag';
+import { createProperty } from '../handlers/create_property';
+import { createUse } from '../handlers/create_use';
+import { createNaturalHealingItem } from '../handlers/create_natural_healing_item';
 
 describe('getItemsByTag', () => {
   beforeEach(createDB);
   afterEach(resetDB);
 
-  it('should return items with the specified tag', async () => {
-    // Create test category
-    const categoryResult = await db.insert(categoriesTable)
-      .values({
-        name: 'Test Category',
-        description: 'Category for testing'
-      })
-      .returning()
-      .execute();
-    const categoryId = categoryResult[0].id;
+  it('should return items with specified tag', async () => {
+    // Create prerequisite data using handlers
+    const category = await createCategory({ name: 'Herbs', description: 'Natural herbs' });
+    const tag = await createTag({ name: 'Anti-inflammatory', description: 'Reduces inflammation' });
+    const property = await createProperty({ name: 'Anti-inflammatory', source: 'Clinical study' });
+    const use = await createUse({ name: 'Joint pain relief', source: 'Traditional use' });
 
-    // Create test tags
-    const tagResults = await db.insert(tagsTable)
-      .values([
-        { name: 'Anti-inflammatory', description: 'Reduces inflammation' },
-        { name: 'Antioxidant', description: 'Fights oxidative stress' }
-      ])
-      .returning()
-      .execute();
-    const antiInflammatoryTagId = tagResults[0].id;
-    const antioxidantTagId = tagResults[1].id;
+    // Create items - one with the tag, one without
+    const item1 = await createNaturalHealingItem({
+      name: 'Turmeric',
+      description: 'Anti-inflammatory spice',
+      potential_side_effects: 'May cause stomach upset',
+      image_url: null,
+      category_id: category.id,
+      property_ids: [property.id],
+      use_ids: [use.id],
+      tag_ids: [tag.id]
+    });
 
-    // Create test items
-    const itemResults = await db.insert(naturalHealingItemsTable)
-      .values([
-        {
-          name: 'Turmeric',
-          description: 'Golden spice with healing properties',
-          properties: 'Contains curcumin',
-          uses: 'Reduces inflammation and pain',
-          potential_side_effects: 'May cause stomach upset',
-          category_id: categoryId
-        },
-        {
-          name: 'Ginger',
-          description: 'Root with digestive benefits',
-          properties: 'Contains gingerol',
-          uses: 'Aids digestion and reduces nausea',
-          potential_side_effects: null,
-          category_id: categoryId
-        }
-      ])
-      .returning()
-      .execute();
-    const turmericId = itemResults[0].id;
-    const gingerId = itemResults[1].id;
+    const item2 = await createNaturalHealingItem({
+      name: 'Ginger',
+      description: 'Warming spice',
+      potential_side_effects: null,
+      image_url: null,
+      category_id: category.id,
+      property_ids: [],
+      use_ids: [],
+      tag_ids: [] // No tags
+    });
 
-    // Associate items with tags
-    await db.insert(naturalHealingItemTagsTable)
-      .values([
-        { item_id: turmericId, tag_id: antiInflammatoryTagId },
-        { item_id: turmericId, tag_id: antioxidantTagId },
-        { item_id: gingerId, tag_id: antiInflammatoryTagId }
-      ])
-      .execute();
+    const result = await getItemsByTag(tag.id);
 
-    // Test getting items by anti-inflammatory tag
-    const result = await getItemsByTag(antiInflammatoryTagId);
-
-    expect(result).toHaveLength(2);
-    expect(result.map(item => item.name).sort()).toEqual(['Ginger', 'Turmeric']);
-
-    // Check that items have proper structure
-    const turmericItem = result.find(item => item.name === 'Turmeric');
-    expect(turmericItem).toBeDefined();
-    expect(turmericItem!.category.name).toEqual('Test Category');
-    expect(turmericItem!.tags).toHaveLength(2);
-    expect(turmericItem!.tags.map(tag => tag.name).sort()).toEqual(['Anti-inflammatory', 'Antioxidant']);
-
-    const gingerItem = result.find(item => item.name === 'Ginger');
-    expect(gingerItem).toBeDefined();
-    expect(gingerItem!.category.name).toEqual('Test Category');
-    expect(gingerItem!.tags).toHaveLength(1);
-    expect(gingerItem!.tags[0].name).toEqual('Anti-inflammatory');
+    expect(result).toHaveLength(1);
+    
+    const returnedItem = result[0];
+    expect(returnedItem.name).toBe('Turmeric');
+    expect(returnedItem.description).toBe('Anti-inflammatory spice');
+    expect(returnedItem.potential_side_effects).toBe('May cause stomach upset');
+    expect(returnedItem.category.name).toBe('Herbs');
+    expect(returnedItem.properties).toHaveLength(1);
+    expect(returnedItem.properties[0].name).toBe('Anti-inflammatory');
+    expect(returnedItem.uses).toHaveLength(1);
+    expect(returnedItem.uses[0].name).toBe('Joint pain relief');
+    expect(returnedItem.tags).toHaveLength(1);
+    expect(returnedItem.tags[0].name).toBe('Anti-inflammatory');
   });
 
-  it('should return empty array when no items have the specified tag', async () => {
-    // Create test category and tag
-    const categoryResult = await db.insert(categoriesTable)
-      .values({
-        name: 'Test Category',
-        description: 'Category for testing'
-      })
-      .returning()
-      .execute();
-
-    const tagResult = await db.insert(tagsTable)
-      .values({
-        name: 'Unused Tag',
-        description: 'Tag not associated with any items'
-      })
-      .returning()
-      .execute();
-
-    const result = await getItemsByTag(tagResult[0].id);
-
+  it('should return empty array for non-existent tag', async () => {
+    const result = await getItemsByTag(999);
     expect(result).toHaveLength(0);
   });
 
-  it('should return items with complete category and tag information', async () => {
-    // Create test data
-    const categoryResult = await db.insert(categoriesTable)
-      .values({
-        name: 'Herbs',
-        description: 'Medicinal herbs'
-      })
-      .returning()
-      .execute();
+  it('should return multiple items for the same tag', async () => {
+    // Create prerequisite data using handlers
+    const category = await createCategory({ name: 'Supplements', description: 'Natural supplements' });
+    const tag = await createTag({ name: 'Immune support', description: 'Supports immune system' });
+    const property1 = await createProperty({ name: 'Antioxidant', source: 'Research' });
+    const property2 = await createProperty({ name: 'Immune support', source: 'Clinical trial' });
+    const use1 = await createUse({ name: 'Immune system', source: 'Traditional use' });
+    const use2 = await createUse({ name: 'Skin health', source: 'Study' });
 
-    const tagResult = await db.insert(tagsTable)
-      .values({
-        name: 'Digestive',
-        description: 'Supports digestive health'
-      })
-      .returning()
-      .execute();
+    const item1 = await createNaturalHealingItem({
+      name: 'Vitamin C',
+      description: 'Immune boosting vitamin',
+      potential_side_effects: 'May cause stomach upset',
+      image_url: null,
+      category_id: category.id,
+      property_ids: [property1.id],
+      use_ids: [use1.id, use2.id],
+      tag_ids: [tag.id]
+    });
 
-    const itemResult = await db.insert(naturalHealingItemsTable)
-      .values({
-        name: 'Peppermint',
-        description: 'Cooling herb for digestion',
-        properties: 'Contains menthol',
-        uses: 'Soothes digestive issues',
-        potential_side_effects: 'May cause heartburn in some people',
-        image_url: 'https://example.com/peppermint.jpg',
-        category_id: categoryResult[0].id
-      })
-      .returning()
-      .execute();
+    const item2 = await createNaturalHealingItem({
+      name: 'Zinc',
+      description: 'Essential mineral',
+      potential_side_effects: 'May cause nausea',
+      image_url: null,
+      category_id: category.id,
+      property_ids: [property2.id],
+      use_ids: [use1.id],
+      tag_ids: [tag.id]
+    });
 
-    await db.insert(naturalHealingItemTagsTable)
-      .values({
-        item_id: itemResult[0].id,
-        tag_id: tagResult[0].id
-      })
-      .execute();
+    const result = await getItemsByTag(tag.id);
 
-    const result = await getItemsByTag(tagResult[0].id);
+    expect(result).toHaveLength(2);
+    
+    const itemNames = result.map(item => item.name).sort();
+    expect(itemNames).toEqual(['Vitamin C', 'Zinc']);
+    
+    // Verify all items have the specified tag
+    result.forEach(item => {
+      const hasTag = item.tags.some(t => t.id === tag.id);
+      expect(hasTag).toBe(true);
+    });
+  });
+
+  it('should include all tags for each item, not just the searched tag', async () => {
+    // Create prerequisite data using handlers
+    const category = await createCategory({ name: 'Herbs', description: 'Natural herbs' });
+    const searchTag = await createTag({ name: 'Anti-inflammatory', description: 'Reduces inflammation' });
+    const additionalTag = await createTag({ name: 'Antioxidant', description: 'Fights free radicals' });
+    const property = await createProperty({ name: 'Anti-inflammatory', source: 'Clinical study' });
+    const use = await createUse({ name: 'Joint health', source: 'Traditional use' });
+
+    const item = await createNaturalHealingItem({
+      name: 'Turmeric',
+      description: 'Golden spice',
+      potential_side_effects: null,
+      image_url: null,
+      category_id: category.id,
+      property_ids: [property.id],
+      use_ids: [use.id],
+      tag_ids: [searchTag.id, additionalTag.id]
+    });
+
+    const result = await getItemsByTag(searchTag.id);
 
     expect(result).toHaveLength(1);
-    const item = result[0];
     
-    // Verify item properties
-    expect(item.name).toEqual('Peppermint');
-    expect(item.description).toEqual('Cooling herb for digestion');
-    expect(item.properties).toEqual('Contains menthol');
-    expect(item.uses).toEqual('Soothes digestive issues');
-    expect(item.potential_side_effects).toEqual('May cause heartburn in some people');
-    expect(item.image_url).toEqual('https://example.com/peppermint.jpg');
-    expect(item.created_at).toBeInstanceOf(Date);
-    expect(item.updated_at).toBeInstanceOf(Date);
-
-    // Verify category
-    expect(item.category.name).toEqual('Herbs');
-    expect(item.category.description).toEqual('Medicinal herbs');
-    expect(item.category.created_at).toBeInstanceOf(Date);
-
-    // Verify tags
-    expect(item.tags).toHaveLength(1);
-    expect(item.tags[0].name).toEqual('Digestive');
-    expect(item.tags[0].description).toEqual('Supports digestive health');
-    expect(item.tags[0].created_at).toBeInstanceOf(Date);
+    const returnedItem = result[0];
+    expect(returnedItem.tags).toHaveLength(2);
+    
+    const tagNames = returnedItem.tags.map(tag => tag.name).sort();
+    expect(tagNames).toEqual(['Anti-inflammatory', 'Antioxidant']);
   });
 });

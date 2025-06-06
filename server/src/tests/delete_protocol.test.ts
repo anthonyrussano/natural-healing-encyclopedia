@@ -69,8 +69,6 @@ describe('deleteProtocol', () => {
       .values({
         name: 'Test Item',
         description: 'A test healing item',
-        properties: 'Test properties',
-        uses: 'Test uses',
         potential_side_effects: null,
         image_url: null,
         category_id: categoryResult[0].id

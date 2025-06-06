@@ -2,9 +2,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { resetDB, createDB } from '../helpers';
 import { db } from '../db';
-import { protocolsTable, protocolItemsTable, categoriesTable, naturalHealingItemsTable, tagsTable, naturalHealingItemTagsTable } from '../db/schema';
+import { protocolsTable, protocolItemsTable } from '../db/schema';
 import { type CreateProtocolInput } from '../schema';
 import { createProtocol } from '../handlers/create_protocol';
+import { createCategory } from '../handlers/create_category';
+import { createTag } from '../handlers/create_tag';
+import { createNaturalHealingItem } from '../handlers/create_natural_healing_item';
+import { createProperty } from '../handlers/create_property';
+import { createUse } from '../handlers/create_use';
 import { eq } from 'drizzle-orm';
 
 describe('createProtocol', () => {
@@ -28,41 +33,27 @@ describe('createProtocol', () => {
   });
 
   it('should create a protocol with items', async () => {
-    // Create prerequisite data
-    const categoryResult = await db.insert(categoriesTable)
-      .values({ name: 'Herbs', description: 'Herbal remedies' })
-      .returning()
-      .execute();
-    const categoryId = categoryResult[0].id;
+    // Create prerequisite data using handlers
+    const category = await createCategory({ name: 'Herbs', description: 'Herbal remedies' });
+    const tag = await createTag({ name: 'Anti-inflammatory', description: 'Reduces inflammation' });
+    const property = await createProperty({ name: 'Anti-inflammatory', source: 'Clinical study' });
+    const use = await createUse({ name: 'Joint pain relief', source: 'Traditional use' });
 
-    const tagResult = await db.insert(tagsTable)
-      .values({ name: 'Anti-inflammatory', description: 'Reduces inflammation' })
-      .returning()
-      .execute();
-    const tagId = tagResult[0].id;
-
-    const itemResult = await db.insert(naturalHealingItemsTable)
-      .values({
-        name: 'Turmeric',
-        description: 'Golden spice with healing properties',
-        properties: 'Anti-inflammatory, antioxidant',
-        uses: 'Joint pain, inflammation',
-        potential_side_effects: 'May cause stomach upset',
-        category_id: categoryId
-      })
-      .returning()
-      .execute();
-    const itemId = itemResult[0].id;
-
-    // Link item to tag
-    await db.insert(naturalHealingItemTagsTable)
-      .values({ item_id: itemId, tag_id: tagId })
-      .execute();
+    const item = await createNaturalHealingItem({
+      name: 'Turmeric',
+      description: 'Golden spice with healing properties',
+      potential_side_effects: 'May cause stomach upset',
+      image_url: null,
+      category_id: category.id,
+      property_ids: [property.id],
+      use_ids: [use.id],
+      tag_ids: [tag.id]
+    });
 
     const testInput: CreateProtocolInput = {
       name: 'Inflammation Protocol',
       description: 'Protocol for reducing inflammation',
-      item_ids: [itemId]
+      item_ids: [item.id]
     };
 
     const result = await createProtocol(testInput);
@@ -72,6 +63,9 @@ describe('createProtocol', () => {
     expect(result.items).toHaveLength(1);
     expect(result.items[0].name).toEqual('Turmeric');
     expect(result.items[0].category.name).toEqual('Herbs');
+    expect(result.items[0].tags).toHaveLength(1);
+    expect(result.items[0].tags[0].name).toEqual('Anti-inflammatory');
+    // The createProtocol handler doesn't fetch properties and uses, only tags
     expect(result.items[0].tags).toHaveLength(1);
     expect(result.items[0].tags[0].name).toEqual('Anti-inflammatory');
   });
@@ -96,34 +90,36 @@ describe('createProtocol', () => {
   });
 
   it('should create protocol-item relationships', async () => {
-    // Create prerequisite data
-    const categoryResult = await db.insert(categoriesTable)
-      .values({ name: 'Supplements', description: 'Nutritional supplements' })
-      .returning()
-      .execute();
-    const categoryId = categoryResult[0].id;
+    // Create prerequisite data using handlers
+    const category = await createCategory({ name: 'Supplements', description: 'Nutritional supplements' });
+    const property1 = await createProperty({ name: 'Antioxidant', source: 'Study 1' });
+    const property2 = await createProperty({ name: 'Immune support', source: 'Study 2' });
+    const use1 = await createUse({ name: 'Immune system', source: 'Traditional use' });
+    const use2 = await createUse({ name: 'Skin health', source: 'Research' });
 
-    const itemResults = await db.insert(naturalHealingItemsTable)
-      .values([
-        {
-          name: 'Vitamin C',
-          description: 'Essential vitamin',
-          properties: 'Antioxidant, immune support',
-          uses: 'Immune system, skin health',
-          category_id: categoryId
-        },
-        {
-          name: 'Zinc',
-          description: 'Essential mineral',
-          properties: 'Immune support, wound healing',
-          uses: 'Immune system, wound healing',
-          category_id: categoryId
-        }
-      ])
-      .returning()
-      .execute();
+    const item1 = await createNaturalHealingItem({
+      name: 'Vitamin C',
+      description: 'Essential vitamin',
+      potential_side_effects: null,
+      image_url: null,
+      category_id: category.id,
+      property_ids: [property1.id],
+      use_ids: [use1.id, use2.id],
+      tag_ids: []
+    });
 
-    const itemIds = itemResults.map(item => item.id);
+    const item2 = await createNaturalHealingItem({
+      name: 'Zinc',
+      description: 'Essential mineral',
+      potential_side_effects: null,
+      image_url: null,
+      category_id: category.id,
+      property_ids: [property2.id],
+      use_ids: [use1.id],
+      tag_ids: []
+    });
+
+    const itemIds = [item1.id, item2.id];
 
     const testInput: CreateProtocolInput = {
       name: 'Immune Support Protocol',
