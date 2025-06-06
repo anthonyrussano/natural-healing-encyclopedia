@@ -1,4 +1,3 @@
-
 import { initTRPC } from '@trpc/server';
 import { createHTTPServer } from '@trpc/server/adapters/standalone';
 import 'dotenv/config';
@@ -9,7 +8,13 @@ import { z } from 'zod';
 // Import schemas
 import { 
   createCategoryInputSchema,
+  updateCategoryInputSchema,
   createTagInputSchema,
+  updateTagInputSchema,
+  createPropertyInputSchema,
+  updatePropertyInputSchema,
+  createUseInputSchema,
+  updateUseInputSchema,
   createNaturalHealingItemInputSchema,
   updateNaturalHealingItemInputSchema,
   createProtocolInputSchema,
@@ -19,8 +24,20 @@ import {
 // Import handlers
 import { createCategory } from './handlers/create_category';
 import { getCategories } from './handlers/get_categories';
+import { updateCategory } from './handlers/update_category';
+import { deleteCategory } from './handlers/delete_category';
 import { createTag } from './handlers/create_tag';
 import { getTags } from './handlers/get_tags';
+import { updateTag } from './handlers/update_tag';
+import { deleteTag } from './handlers/delete_tag';
+import { createProperty } from './handlers/create_property';
+import { getProperties } from './handlers/get_properties';
+import { updateProperty } from './handlers/update_property';
+import { deleteProperty } from './handlers/delete_property';
+import { createUse } from './handlers/create_use';
+import { getUses } from './handlers/get_uses';
+import { updateUse } from './handlers/update_use';
+import { deleteUse } from './handlers/delete_use';
 import { createNaturalHealingItem } from './handlers/create_natural_healing_item';
 import { getNaturalHealingItems } from './handlers/get_natural_healing_items';
 import { getNaturalHealingItemById } from './handlers/get_natural_healing_item_by_id';
@@ -52,6 +69,12 @@ const appRouter = router({
     .mutation(({ input }) => createCategory(input)),
   getCategories: publicProcedure
     .query(() => getCategories()),
+  updateCategory: publicProcedure
+    .input(updateCategoryInputSchema)
+    .mutation(({ input }) => updateCategory(input)),
+  deleteCategory: publicProcedure
+    .input(z.number())
+    .mutation(({ input }) => deleteCategory(input)),
   
   // Tag endpoints
   createTag: publicProcedure
@@ -59,6 +82,38 @@ const appRouter = router({
     .mutation(({ input }) => createTag(input)),
   getTags: publicProcedure
     .query(() => getTags()),
+  updateTag: publicProcedure
+    .input(updateTagInputSchema)
+    .mutation(({ input }) => updateTag(input)),
+  deleteTag: publicProcedure
+    .input(z.number())
+    .mutation(({ input }) => deleteTag(input)),
+
+  // Property endpoints
+  createProperty: publicProcedure
+    .input(createPropertyInputSchema)
+    .mutation(({ input }) => createProperty(input)),
+  getProperties: publicProcedure
+    .query(() => getProperties()),
+  updateProperty: publicProcedure
+    .input(updatePropertyInputSchema)
+    .mutation(({ input }) => updateProperty(input)),
+  deleteProperty: publicProcedure
+    .input(z.number())
+    .mutation(({ input }) => deleteProperty(input)),
+
+  // Use endpoints
+  createUse: publicProcedure
+    .input(createUseInputSchema)
+    .mutation(({ input }) => createUse(input)),
+  getUses: publicProcedure
+    .query(() => getUses()),
+  updateUse: publicProcedure
+    .input(updateUseInputSchema)
+    .mutation(({ input }) => updateUse(input)),
+  deleteUse: publicProcedure
+    .input(z.number())
+    .mutation(({ input }) => deleteUse(input)),
   
   // Natural healing item endpoints
   createNaturalHealingItem: publicProcedure

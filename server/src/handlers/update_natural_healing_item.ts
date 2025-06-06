@@ -1,6 +1,14 @@
-
 import { db } from '../db';
-import { naturalHealingItemsTable, naturalHealingItemTagsTable, categoriesTable, tagsTable } from '../db/schema';
+import { 
+  naturalHealingItemsTable, 
+  naturalHealingItemTagsTable, 
+  naturalHealingItemPropertiesTable,
+  naturalHealingItemUsesTable,
+  categoriesTable, 
+  tagsTable,
+  propertiesTable,
+  usesTable
+} from '../db/schema';
 import { type UpdateNaturalHealingItemInput, type NaturalHealingItemWithRelations } from '../schema';
 import { eq } from 'drizzle-orm';
 
@@ -42,6 +50,34 @@ export const updateNaturalHealingItem = async (input: UpdateNaturalHealingItemIn
       }
     }
 
+    // If property_ids are being updated, validate they exist
+    if (input.property_ids !== undefined) {
+      for (const propertyId of input.property_ids) {
+        const property = await db.select()
+          .from(propertiesTable)
+          .where(eq(propertiesTable.id, propertyId))
+          .execute();
+
+        if (property.length === 0) {
+          throw new Error(`Property with id ${propertyId} not found`);
+        }
+      }
+    }
+
+    // If use_ids are being updated, validate they exist
+    if (input.use_ids !== undefined) {
+      for (const useId of input.use_ids) {
+        const use = await db.select()
+          .from(usesTable)
+          .where(eq(usesTable.id, useId))
+          .execute();
+
+        if (use.length === 0) {
+          throw new Error(`Use with id ${useId} not found`);
+        }
+      }
+    }
+
     // Build update object with only provided fields
     const updateData: any = {
       updated_at: new Date()
@@ -49,8 +85,6 @@ export const updateNaturalHealingItem = async (input: UpdateNaturalHealingItemIn
 
     if (input.name !== undefined) updateData.name = input.name;
     if (input.description !== undefined) updateData.description = input.description;
-    if (input.properties !== undefined) updateData.properties = input.properties;
-    if (input.uses !== undefined) updateData.uses = input.uses;
     if (input.potential_side_effects !== undefined) updateData.potential_side_effects = input.potential_side_effects;
     if (input.image_url !== undefined) updateData.image_url = input.image_url;
     if (input.category_id !== undefined) updateData.category_id = input.category_id;
@@ -82,6 +116,42 @@ export const updateNaturalHealingItem = async (input: UpdateNaturalHealingItemIn
       }
     }
 
+    // Handle property updates if provided
+    if (input.property_ids !== undefined) {
+      // Delete existing property associations
+      await db.delete(naturalHealingItemPropertiesTable)
+        .where(eq(naturalHealingItemPropertiesTable.item_id, input.id))
+        .execute();
+
+      // Insert new property associations
+      if (input.property_ids.length > 0) {
+        await db.insert(naturalHealingItemPropertiesTable)
+          .values(input.property_ids.map(propertyId => ({
+            item_id: input.id,
+            property_id: propertyId
+          })))
+          .execute();
+      }
+    }
+
+    // Handle use updates if provided
+    if (input.use_ids !== undefined) {
+      // Delete existing use associations
+      await db.delete(naturalHealingItemUsesTable)
+        .where(eq(naturalHealingItemUsesTable.item_id, input.id))
+        .execute();
+
+      // Insert new use associations
+      if (input.use_ids.length > 0) {
+        await db.insert(naturalHealingItemUsesTable)
+          .values(input.use_ids.map(useId => ({
+            item_id: input.id,
+            use_id: useId
+          })))
+          .execute();
+      }
+    }
+
     // Fetch the complete item with relations
     const itemWithCategory = await db.select()
       .from(naturalHealingItemsTable)
@@ -105,12 +175,38 @@ export const updateNaturalHealingItem = async (input: UpdateNaturalHealingItemIn
       .where(eq(naturalHealingItemTagsTable.item_id, input.id))
       .execute();
 
+    // Fetch associated properties
+    const itemProperties = await db.select({
+      property: {
+        id: propertiesTable.id,
+        name: propertiesTable.name,
+        source: propertiesTable.source,
+        created_at: propertiesTable.created_at
+      }
+    })
+      .from(naturalHealingItemPropertiesTable)
+      .innerJoin(propertiesTable, eq(naturalHealingItemPropertiesTable.property_id, propertiesTable.id))
+      .where(eq(naturalHealingItemPropertiesTable.item_id, input.id))
+      .execute();
+
+    // Fetch associated uses
+    const itemUses = await db.select({
+      use: {
+        id: usesTable.id,
+        name: usesTable.name,
+        source: usesTable.source,
+        created_at: usesTable.created_at
+      }
+    })
+      .from(naturalHealingItemUsesTable)
+      .innerJoin(usesTable, eq(naturalHealingItemUsesTable.use_id, usesTable.id))
+      .where(eq(naturalHealingItemUsesTable.item_id, input.id))
+      .execute();
+
     return {
       id: itemData.natural_healing_items.id,
       name: itemData.natural_healing_items.name,
       description: itemData.natural_healing_items.description,
-      properties: itemData.natural_healing_items.properties,
-      uses: itemData.natural_healing_items.uses,
       potential_side_effects: itemData.natural_healing_items.potential_side_effects,
       image_url: itemData.natural_healing_items.image_url,
       category_id: itemData.natural_healing_items.category_id,
@@ -122,6 +218,8 @@ export const updateNaturalHealingItem = async (input: UpdateNaturalHealingItemIn
         description: itemData.categories.description,
         created_at: itemData.categories.created_at
       },
+      properties: itemProperties.map(item => item.property),
+      uses: itemUses.map(item => item.use),
       tags: itemTags.map(item => item.tag)
     };
   } catch (error) {

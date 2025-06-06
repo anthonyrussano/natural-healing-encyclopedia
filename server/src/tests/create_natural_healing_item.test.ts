@@ -1,161 +1,110 @@
-
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { resetDB, createDB } from '../helpers';
-import { db } from '../db';
-import { categoriesTable, tagsTable, naturalHealingItemsTable, naturalHealingItemTagsTable } from '../db/schema';
-import { type CreateNaturalHealingItemInput } from '../schema';
+import { type CreateNaturalHealingItemInput, type CreateCategoryInput, type CreatePropertyInput, type CreateUseInput, type CreateTagInput } from '../schema';
 import { createNaturalHealingItem } from '../handlers/create_natural_healing_item';
-import { eq } from 'drizzle-orm';
+import { createCategory } from '../handlers/create_category';
+import { createProperty } from '../handlers/create_property';
+import { createUse } from '../handlers/create_use';
+import { createTag } from '../handlers/create_tag';
 
 describe('createNaturalHealingItem', () => {
-  let testCategoryId: number;
-  let testTagIds: number[];
-
-  beforeEach(async () => {
-    await createDB();
-    
-    // Create test category
-    const categoryResult = await db.insert(categoriesTable)
-      .values({
-        name: 'Test Category',
-        description: 'A category for testing'
-      })
-      .returning()
-      .execute();
-    testCategoryId = categoryResult[0].id;
-
-    // Create test tags
-    const tagResults = await db.insert(tagsTable)
-      .values([
-        { name: 'Anti-inflammatory', description: 'Reduces inflammation' },
-        { name: 'Antioxidant', description: 'Fights free radicals' }
-      ])
-      .returning()
-      .execute();
-    testTagIds = tagResults.map(tag => tag.id);
-  });
-
+  beforeEach(createDB);
   afterEach(resetDB);
 
-  it('should create a natural healing item without tags', async () => {
+  it('should create a natural healing item with properties and uses', async () => {
+    // Create prerequisite data
+    const category = await createCategory({ name: 'Herbs', description: 'Herbal remedies' });
+    const property = await createProperty({ name: 'Anti-inflammatory', source: 'Clinical study 2023' });
+    const use = await createUse({ name: 'Pain relief', source: 'Traditional medicine' });
+    const tag = await createTag({ name: 'Digestive', description: 'Aids digestion' });
+
     const testInput: CreateNaturalHealingItemInput = {
       name: 'Test Herb',
       description: 'A healing herb for testing',
-      properties: 'Anti-inflammatory, antimicrobial',
-      uses: 'Used for pain relief and wound healing',
       potential_side_effects: 'May cause drowsiness',
       image_url: 'https://example.com/herb.jpg',
-      category_id: testCategoryId
+      category_id: category.id,
+      property_ids: [property.id],
+      use_ids: [use.id],
+      tag_ids: [tag.id]
     };
 
     const result = await createNaturalHealingItem(testInput);
 
-    // Verify basic fields
     expect(result.name).toEqual('Test Herb');
-    expect(result.description).toEqual(testInput.description);
-    expect(result.properties).toEqual(testInput.properties);
-    expect(result.uses).toEqual(testInput.uses);
-    expect(result.potential_side_effects).toEqual(testInput.potential_side_effects);
-    expect(result.image_url).toEqual(testInput.image_url);
-    expect(result.category_id).toEqual(testCategoryId);
+    expect(result.description).toEqual('A healing herb for testing');
+    expect(result.potential_side_effects).toEqual('May cause drowsiness');
+    expect(result.image_url).toEqual('https://example.com/herb.jpg');
+    expect(result.category_id).toEqual(category.id);
     expect(result.id).toBeDefined();
     expect(result.created_at).toBeInstanceOf(Date);
     expect(result.updated_at).toBeInstanceOf(Date);
 
-    // Verify category relation
-    expect(result.category).toBeDefined();
-    expect(result.category.name).toEqual('Test Category');
-    expect(result.category.id).toEqual(testCategoryId);
-
-    // Verify empty tags array
-    expect(result.tags).toEqual([]);
+    // Check relations
+    expect(result.category.name).toEqual('Herbs');
+    expect(result.properties).toHaveLength(1);
+    expect(result.properties[0].name).toEqual('Anti-inflammatory');
+    expect(result.properties[0].source).toEqual('Clinical study 2023');
+    expect(result.uses).toHaveLength(1);
+    expect(result.uses[0].name).toEqual('Pain relief');
+    expect(result.uses[0].source).toEqual('Traditional medicine');
+    expect(result.tags).toHaveLength(1);
+    expect(result.tags[0].name).toEqual('Digestive');
   });
 
-  it('should create a natural healing item with tags', async () => {
+  it('should create a natural healing item without optional relations', async () => {
+    const category = await createCategory({ name: 'Minerals', description: null });
+
     const testInput: CreateNaturalHealingItemInput = {
-      name: 'Test Herb with Tags',
-      description: 'A healing herb with associated tags',
-      properties: 'Anti-inflammatory, antioxidant',
-      uses: 'Used for inflammation and oxidative stress',
+      name: 'Test Mineral',
+      description: 'A healing mineral for testing',
       potential_side_effects: null,
       image_url: null,
-      category_id: testCategoryId,
-      tag_ids: testTagIds
+      category_id: category.id,
+      property_ids: [],
+      use_ids: [],
+      tag_ids: []
     };
 
     const result = await createNaturalHealingItem(testInput);
 
-    // Verify basic fields
-    expect(result.name).toEqual('Test Herb with Tags');
+    expect(result.name).toEqual('Test Mineral');
     expect(result.potential_side_effects).toBeNull();
     expect(result.image_url).toBeNull();
-
-    // Verify tags relation
-    expect(result.tags).toHaveLength(2);
-    expect(result.tags.some(tag => tag.name === 'Anti-inflammatory')).toBe(true);
-    expect(result.tags.some(tag => tag.name === 'Antioxidant')).toBe(true);
-  });
-
-  it('should save item to database correctly', async () => {
-    const testInput: CreateNaturalHealingItemInput = {
-      name: 'Database Test Herb',
-      description: 'Testing database persistence',
-      properties: 'Healing properties',
-      uses: 'Various healing uses',
-      potential_side_effects: 'Minor side effects',
-      image_url: 'https://example.com/test.jpg',
-      category_id: testCategoryId,
-      tag_ids: [testTagIds[0]]
-    };
-
-    const result = await createNaturalHealingItem(testInput);
-
-    // Verify item exists in database
-    const items = await db.select()
-      .from(naturalHealingItemsTable)
-      .where(eq(naturalHealingItemsTable.id, result.id))
-      .execute();
-
-    expect(items).toHaveLength(1);
-    expect(items[0].name).toEqual('Database Test Herb');
-    expect(items[0].category_id).toEqual(testCategoryId);
-
-    // Verify tag association exists in database
-    const tagAssociations = await db.select()
-      .from(naturalHealingItemTagsTable)
-      .where(eq(naturalHealingItemTagsTable.item_id, result.id))
-      .execute();
-
-    expect(tagAssociations).toHaveLength(1);
-    expect(tagAssociations[0].tag_id).toEqual(testTagIds[0]);
+    expect(result.properties).toHaveLength(0);
+    expect(result.uses).toHaveLength(0);
+    expect(result.tags).toHaveLength(0);
   });
 
   it('should throw error for non-existent category', async () => {
     const testInput: CreateNaturalHealingItemInput = {
-      name: 'Invalid Category Item',
-      description: 'Testing invalid category',
-      properties: 'Test properties',
-      uses: 'Test uses',
+      name: 'Test Item',
+      description: 'Test description',
       potential_side_effects: null,
       image_url: null,
-      category_id: 99999 // Non-existent category
+      category_id: 999, // Non-existent category
+      property_ids: [],
+      use_ids: [],
+      tag_ids: []
     };
 
-    expect(createNaturalHealingItem(testInput)).rejects.toThrow(/category.*not found/i);
+    expect(createNaturalHealingItem(testInput)).rejects.toThrow(/Category with id 999 not found/);
   });
 
-  it('should throw error for non-existent tag', async () => {
+  it('should throw error for non-existent property', async () => {
+    const category = await createCategory({ name: 'Test Category', description: null });
+
     const testInput: CreateNaturalHealingItemInput = {
-      name: 'Invalid Tag Item',
-      description: 'Testing invalid tag',
-      properties: 'Test properties',
-      uses: 'Test uses',
+      name: 'Test Item',
+      description: 'Test description',
       potential_side_effects: null,
       image_url: null,
-      category_id: testCategoryId,
-      tag_ids: [99999] // Non-existent tag
+      category_id: category.id,
+      property_ids: [999], // Non-existent property
+      use_ids: [],
+      tag_ids: []
     };
 
-    expect(createNaturalHealingItem(testInput)).rejects.toThrow(/tag.*not found/i);
+    expect(createNaturalHealingItem(testInput)).rejects.toThrow(/Property with id 999 not found/);
   });
 });

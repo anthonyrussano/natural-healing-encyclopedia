@@ -1,8 +1,18 @@
-
 import { db } from '../db';
-import { protocolsTable, protocolItemsTable, naturalHealingItemsTable, categoriesTable, naturalHealingItemTagsTable, tagsTable } from '../db/schema';
+import { 
+  protocolsTable, 
+  protocolItemsTable, 
+  naturalHealingItemsTable, 
+  categoriesTable, 
+  naturalHealingItemTagsTable, 
+  naturalHealingItemPropertiesTable,
+  naturalHealingItemUsesTable,
+  tagsTable,
+  propertiesTable,
+  usesTable
+} from '../db/schema';
 import { type UpdateProtocolInput, type ProtocolWithItems } from '../schema';
-import { eq, and } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 
 export const updateProtocol = async (input: UpdateProtocolInput): Promise<ProtocolWithItems> => {
   try {
@@ -86,27 +96,76 @@ export const updateProtocol = async (input: UpdateProtocolInput): Promise<Protoc
       .where(eq(protocolItemsTable.protocol_id, input.id))
       .execute();
 
-    // Get tags for each item
-    const items = [];
-    for (const result of protocolItemsResult) {
+    const itemIds = protocolItemsResult.map(result => result.natural_healing_items.id);
+    let itemTags: any[] = [];
+    let itemProperties: any[] = [];
+    let itemUses: any[] = [];
+
+    if (itemIds.length > 0) {
+      // Get all related data for these items
+      itemTags = await db.select({
+        item_id: naturalHealingItemTagsTable.item_id,
+        tag: tagsTable,
+      })
+        .from(naturalHealingItemTagsTable)
+        .innerJoin(tagsTable, eq(naturalHealingItemTagsTable.tag_id, tagsTable.id))
+        .execute();
+
+      itemProperties = await db.select({
+        item_id: naturalHealingItemPropertiesTable.item_id,
+        property: propertiesTable,
+      })
+        .from(naturalHealingItemPropertiesTable)
+        .innerJoin(propertiesTable, eq(naturalHealingItemPropertiesTable.property_id, propertiesTable.id))
+        .execute();
+
+      itemUses = await db.select({
+        item_id: naturalHealingItemUsesTable.item_id,
+        use: usesTable,
+      })
+        .from(naturalHealingItemUsesTable)
+        .innerJoin(usesTable, eq(naturalHealingItemUsesTable.use_id, usesTable.id))
+        .execute();
+    }
+
+    // Group by item ID
+    const tagsByItemId: Record<number, any[]> = {};
+    const propertiesByItemId: Record<number, any[]> = {};
+    const usesByItemId: Record<number, any[]> = {};
+
+    itemTags.forEach(result => {
+      if (itemIds.includes(result.item_id)) {
+        if (!tagsByItemId[result.item_id]) tagsByItemId[result.item_id] = [];
+        tagsByItemId[result.item_id].push(result.tag);
+      }
+    });
+
+    itemProperties.forEach(result => {
+      if (itemIds.includes(result.item_id)) {
+        if (!propertiesByItemId[result.item_id]) propertiesByItemId[result.item_id] = [];
+        propertiesByItemId[result.item_id].push(result.property);
+      }
+    });
+
+    itemUses.forEach(result => {
+      if (itemIds.includes(result.item_id)) {
+        if (!usesByItemId[result.item_id]) usesByItemId[result.item_id] = [];
+        usesByItemId[result.item_id].push(result.use);
+      }
+    });
+
+    const items = protocolItemsResult.map(result => {
       const item = result.natural_healing_items;
       const category = result.categories;
 
-      // Fetch tags for this item
-      const itemTagsResult = await db.select()
-        .from(naturalHealingItemTagsTable)
-        .innerJoin(tagsTable, eq(naturalHealingItemTagsTable.tag_id, tagsTable.id))
-        .where(eq(naturalHealingItemTagsTable.item_id, item.id))
-        .execute();
-
-      const tags = itemTagsResult.map(tagResult => tagResult.tags);
-
-      items.push({
+      return {
         ...item,
+        properties: propertiesByItemId[item.id] || [],
+        uses: usesByItemId[item.id] || [],
         category,
-        tags
-      });
-    }
+        tags: tagsByItemId[item.id] || []
+      };
+    });
 
     return {
       ...protocol,

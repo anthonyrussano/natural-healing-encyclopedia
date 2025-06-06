@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useCallback } from 'react';
 import { trpc } from '@/utils/trpc';
 import { Button } from '@/components/ui/button';
@@ -8,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
@@ -17,9 +17,13 @@ import type {
   NaturalHealingItemWithRelations, 
   Category, 
   Tag, 
+  Property,
+  Use,
   CreateNaturalHealingItemInput,
   CreateCategoryInput,
   CreateTagInput,
+  CreatePropertyInput,
+  CreateUseInput,
   ProtocolWithItems,
   ProtocolWithMetadata,
   CreateProtocolInput
@@ -30,6 +34,8 @@ function App() {
   const [items, setItems] = useState<NaturalHealingItemWithRelations[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [uses, setUses] = useState<Use[]>([]);
   const [protocols, setProtocols] = useState<ProtocolWithItems[]>([]);
   const [selectedProtocol, setSelectedProtocol] = useState<ProtocolWithMetadata | null>(null);
   
@@ -38,20 +44,26 @@ function App() {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedTag, setSelectedTag] = useState<string>('all');
   
-  // State for forms
+  // State for forms and modals
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('items');
+  const [editingItem, setEditingItem] = useState<NaturalHealingItemWithRelations | null>(null);
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+  const [editingTag, setEditingTag] = useState<Tag | null>(null);
+  const [editingProperty, setEditingProperty] = useState<Property | null>(null);
+  const [editingUse, setEditingUse] = useState<Use | null>(null);
+  const [editingProtocol, setEditingProtocol] = useState<ProtocolWithItems | null>(null);
   
   // Item form state
   const [itemForm, setItemForm] = useState<CreateNaturalHealingItemInput>({
     name: '',
     description: '',
-    properties: '',
-    uses: '',
     potential_side_effects: null,
     image_url: null,
     category_id: 0,
-    tag_ids: []
+    tag_ids: [],
+    property_ids: [],
+    use_ids: []
   });
   
   // Category form state
@@ -64,6 +76,18 @@ function App() {
   const [tagForm, setTagForm] = useState<CreateTagInput>({
     name: '',
     description: null
+  });
+
+  // Property form state
+  const [propertyForm, setPropertyForm] = useState<CreatePropertyInput>({
+    name: '',
+    source: null
+  });
+
+  // Use form state
+  const [useForm, setUseForm] = useState<CreateUseInput>({
+    name: '',
+    source: null
   });
   
   // Protocol form state
@@ -101,6 +125,24 @@ function App() {
     }
   }, []);
 
+  const loadProperties = useCallback(async () => {
+    try {
+      const result = await trpc.getProperties.query();
+      setProperties(result);
+    } catch (error) {
+      console.error('Failed to load properties:', error);
+    }
+  }, []);
+
+  const loadUses = useCallback(async () => {
+    try {
+      const result = await trpc.getUses.query();
+      setUses(result);
+    } catch (error) {
+      console.error('Failed to load uses:', error);
+    }
+  }, []);
+
   const loadProtocols = useCallback(async () => {
     try {
       const result = await trpc.getProtocols.query();
@@ -124,8 +166,10 @@ function App() {
     loadItems();
     loadCategories();
     loadTags();
+    loadProperties();
+    loadUses();
     loadProtocols();
-  }, [loadItems, loadCategories, loadTags, loadProtocols]);
+  }, [loadItems, loadCategories, loadTags, loadProperties, loadUses, loadProtocols]);
 
   // Filter items based on search and filters
   const filteredItems = items.filter((item: NaturalHealingItemWithRelations) => {
@@ -136,80 +180,333 @@ function App() {
     return matchesSearch && matchesCategory && matchesTag;
   });
 
-  // Form handlers
-  const handleCreateItem = async (e: React.FormEvent) => {
+  // Reset forms
+  const resetItemForm = () => {
+    setItemForm({
+      name: '',
+      description: '',
+      potential_side_effects: null,
+      image_url: null,
+      category_id: 0,
+      tag_ids: [],
+      property_ids: [],
+      use_ids: []
+    });
+    setEditingItem(null);
+  };
+
+  const resetCategoryForm = () => {
+    setCategoryForm({ name: '', description: null });
+    setEditingCategory(null);
+  };
+
+  const resetTagForm = () => {
+    setTagForm({ name: '', description: null });
+    setEditingTag(null);
+  };
+
+  const resetPropertyForm = () => {
+    setPropertyForm({ name: '', source: null });
+    setEditingProperty(null);
+  };
+
+  const resetUseForm = () => {
+    setUseForm({ name: '', source: null });
+    setEditingUse(null);
+  };
+
+  const resetProtocolForm = () => {
+    setProtocolForm({ name: '', description: null, item_ids: [] });
+    setEditingProtocol(null);
+  };
+
+  // Edit handlers
+  const startEditItem = (item: NaturalHealingItemWithRelations) => {
+    setItemForm({
+      name: item.name,
+      description: item.description,
+      potential_side_effects: item.potential_side_effects,
+      image_url: item.image_url,
+      category_id: item.category_id,
+      tag_ids: item.tags.map((tag: Tag) => tag.id),
+      property_ids: item.properties.map((property: Property) => property.id),
+      use_ids: item.uses.map((use: Use) => use.id)
+    });
+    setEditingItem(item);
+  };
+
+  const startEditCategory = (category: Category) => {
+    setCategoryForm({
+      name: category.name,
+      description: category.description
+    });
+    setEditingCategory(category);
+  };
+
+  const startEditTag = (tag: Tag) => {
+    setTagForm({
+      name: tag.name,
+      description: tag.description
+    });
+    setEditingTag(tag);
+  };
+
+  const startEditProperty = (property: Property) => {
+    setPropertyForm({
+      name: property.name,
+      source: property.source
+    });
+    setEditingProperty(property);
+  };
+
+  const startEditUse = (use: Use) => {
+    setUseForm({
+      name: use.name,
+      source: use.source
+    });
+    setEditingUse(use);
+  };
+
+  const startEditProtocol = (protocol: ProtocolWithItems) => {
+    setProtocolForm({
+      name: protocol.name,
+      description: protocol.description,
+      item_ids: protocol.items.map((item: NaturalHealingItemWithRelations) => item.id)
+    });
+    setEditingProtocol(protocol);
+  };
+
+  // Form handlers - Create/Update
+  const handleSubmitItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!itemForm.category_id) return;
     
     setIsLoading(true);
     try {
-      await trpc.createNaturalHealingItem.mutate(itemForm);
+      if (editingItem) {
+        await trpc.updateNaturalHealingItem.mutate({
+          id: editingItem.id,
+          ...itemForm
+        });
+      } else {
+        await trpc.createNaturalHealingItem.mutate(itemForm);
+      }
       await loadItems();
-      setItemForm({
-        name: '',
-        description: '',
-        properties: '',
-        uses: '',
-        potential_side_effects: null,
-        image_url: null,
-        category_id: 0,
-        tag_ids: []
-      });
+      resetItemForm();
     } catch (error) {
-      console.error('Failed to create item:', error);
+      console.error('Failed to save item:', error);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleCreateCategory = async (e: React.FormEvent) => {
+  const handleSubmitCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      await trpc.createCategory.mutate(categoryForm);
+      if (editingCategory) {
+        await trpc.updateCategory.mutate({
+          id: editingCategory.id,
+          ...categoryForm
+        });
+      } else {
+        await trpc.createCategory.mutate(categoryForm);
+      }
       await loadCategories();
-      setCategoryForm({ name: '', description: null });
+      resetCategoryForm();
     } catch (error) {
-      console.error('Failed to create category:', error);
+      console.error('Failed to save category:', error);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleCreateTag = async (e: React.FormEvent) => {
+  const handleSubmitTag = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      await trpc.createTag.mutate(tagForm);
+      if (editingTag) {
+        await trpc.updateTag.mutate({
+          id: editingTag.id,
+          ...tagForm
+        });
+      } else {
+        await trpc.createTag.mutate(tagForm);
+      }
       await loadTags();
-      setTagForm({ name: '', description: null });
+      resetTagForm();
     } catch (error) {
-      console.error('Failed to create tag:', error);
+      console.error('Failed to save tag:', error);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleCreateProtocol = async (e: React.FormEvent) => {
+  const handleSubmitProperty = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      await trpc.createProtocol.mutate(protocolForm);
-      await loadProtocols();
-      setProtocolForm({ name: '', description: null, item_ids: [] });
+      if (editingProperty) {
+        await trpc.updateProperty.mutate({
+          id: editingProperty.id,
+          ...propertyForm
+        });
+      } else {
+        await trpc.createProperty.mutate(propertyForm);
+      }
+      await loadProperties();
+      resetPropertyForm();
     } catch (error) {
-      console.error('Failed to create protocol:', error);
+      console.error('Failed to save property:', error);
     } finally {
       setIsLoading(false);
     }
   };
 
+  const handleSubmitUse = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    try {
+      if (editingUse) {
+        await trpc.updateUse.mutate({
+          id: editingUse.id,
+          ...useForm
+        });
+      } else {
+        await trpc.createUse.mutate(useForm);
+      }
+      await loadUses();
+      resetUseForm();
+    } catch (error) {
+      console.error('Failed to save use:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSubmitProtocol = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    try {
+      if (editingProtocol) {
+        await trpc.updateProtocol.mutate({
+          id: editingProtocol.id,
+          ...protocolForm
+        });
+      } else {
+        await trpc.createProtocol.mutate(protocolForm);
+      }
+      await loadProtocols();
+      resetProtocolForm();
+    } catch (error) {
+      console.error('Failed to save protocol:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Delete handlers
+  const handleDeleteItem = async (id: number) => {
+    setIsLoading(true);
+    try {
+      await trpc.deleteNaturalHealingItem.mutate(id);
+      await loadItems();
+      await loadProtocols(); // Refresh protocols in case they referenced this item
+    } catch (error) {
+      console.error('Failed to delete item:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteCategory = async (id: number) => {
+    setIsLoading(true);
+    try {
+      await trpc.deleteCategory.mutate(id);
+      await loadCategories();
+    } catch (error) {
+      console.error('Failed to delete category:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteTag = async (id: number) => {
+    setIsLoading(true);
+    try {
+      await trpc.deleteTag.mutate(id);
+      await loadTags();
+      await loadItems(); // Refresh items to update tag associations
+    } catch (error) {
+      console.error('Failed to delete tag:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteProperty = async (id: number) => {
+    setIsLoading(true);
+    try {
+      await trpc.deleteProperty.mutate(id);
+      await loadProperties();
+      await loadItems(); // Refresh items to update property associations
+    } catch (error) {
+      console.error('Failed to delete property:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteUse = async (id: number) => {
+    setIsLoading(true);
+    try {
+      await trpc.deleteUse.mutate(id);
+      await loadUses();
+      await loadItems(); // Refresh items to update use associations
+    } catch (error) {
+      console.error('Failed to delete use:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteProtocol = async (id: number) => {
+    setIsLoading(true);
+    try {
+      await trpc.deleteProtocol.mutate(id);
+      await loadProtocols();
+    } catch (error) {
+      console.error('Failed to delete protocol:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Toggle handlers for checkboxes
   const handleTagToggle = (tagId: number, checked: boolean) => {
     setItemForm((prev: CreateNaturalHealingItemInput) => ({
       ...prev,
       tag_ids: checked 
         ? [...(prev.tag_ids || []), tagId]
         : (prev.tag_ids || []).filter((id: number) => id !== tagId)
+    }));
+  };
+
+  const handlePropertyToggle = (propertyId: number, checked: boolean) => {
+    setItemForm((prev: CreateNaturalHealingItemInput) => ({
+      ...prev,
+      property_ids: checked 
+        ? [...(prev.property_ids || []), propertyId]
+        : (prev.property_ids || []).filter((id: number) => id !== propertyId)
+    }));
+  };
+
+  const handleUseToggle = (useId: number, checked: boolean) => {
+    setItemForm((prev: CreateNaturalHealingItemInput) => ({
+      ...prev,
+      use_ids: checked 
+        ? [...(prev.use_ids || []), useId]
+        : (prev.use_ids || []).filter((id: number) => id !== useId)
     }));
   };
 
@@ -231,9 +528,11 @@ function App() {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="items">🌱 Items</TabsTrigger>
             <TabsTrigger value="protocols">📋 Protocols</TabsTrigger>
+            <TabsTrigger value="properties">⚡ Properties</TabsTrigger>
+            <TabsTrigger value="uses">💊 Uses</TabsTrigger>
             <TabsTrigger value="categories">🏷️ Categories</TabsTrigger>
             <TabsTrigger value="tags">🔖 Tags</TabsTrigger>
           </TabsList>
@@ -291,13 +590,13 @@ function App() {
               </CardContent>
             </Card>
 
-            {/* Add Item Form */}
+            {/* Add/Edit Item Form */}
             <Card>
               <CardHeader>
-                <CardTitle>➕ Add New Item</CardTitle>
+                <CardTitle>{editingItem ? '✏️ Edit Item' : '➕ Add New Item'}</CardTitle>
               </CardHeader>
               <CardContent>
-                <form onSubmit={handleCreateItem} className="space-y-4">
+                <form onSubmit={handleSubmitItem} className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <Label htmlFor="item-name">Name</Label>
@@ -346,31 +645,6 @@ function App() {
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <Label htmlFor="item-properties">Properties</Label>
-                      <Textarea
-                        id="item-properties"
-                        value={itemForm.properties}
-                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                          setItemForm((prev: CreateNaturalHealingItemInput) => ({ ...prev, properties: e.target.value }))
-                        }
-                        required
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="item-uses">Uses</Label>
-                      <Textarea
-                        id="item-uses"
-                        value={itemForm.uses}
-                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                          setItemForm((prev: CreateNaturalHealingItemInput) => ({ ...prev, uses: e.target.value }))
-                        }
-                        required
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
                       <Label htmlFor="item-side-effects">Potential Side Effects</Label>
                       <Textarea
                         id="item-side-effects"
@@ -399,27 +673,78 @@ function App() {
                     </div>
                   </div>
                   
-                  <div>
-                    <Label>Tags</Label>
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {tags.map((tag: Tag) => (
-                        <div key={tag.id} className="flex items-center space-x-2">
-                          <Checkbox
-                            id={`tag-${tag.id}`}
-                            checked={(itemForm.tag_ids || []).includes(tag.id)}
-                            onCheckedChange={(checked: boolean) => handleTagToggle(tag.id, checked)}
-                          />
-                          <Label htmlFor={`tag-${tag.id}`} className="text-sm">
-                            {tag.name}
-                          </Label>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <Label>Properties</Label>
+                      <ScrollArea className="h-32 w-full border rounded p-2 mt-2">
+                        <div className="space-y-2">
+                          {properties.map((property: Property) => (
+                            <div key={property.id} className="flex items-center space-x-2">
+                              <Checkbox
+                                id={`property-${property.id}`}
+                                checked={(itemForm.property_ids || []).includes(property.id)}
+                                onCheckedChange={(checked: boolean) => handlePropertyToggle(property.id, checked)}
+                              />
+                              <Label htmlFor={`property-${property.id}`} className="text-xs">
+                                {property.name} {property.source && `(${property.source})`}
+                              </Label>
+                            </div>
+                          ))}
                         </div>
-                      ))}
+                      </ScrollArea>
+                    </div>
+                    
+                    <div>
+                      <Label>Uses</Label>
+                      <ScrollArea className="h-32 w-full border rounded p-2 mt-2">
+                        <div className="space-y-2">
+                          {uses.map((use: Use) => (
+                            <div key={use.id} className="flex items-center space-x-2">
+                              <Checkbox
+                                id={`use-${use.id}`}
+                                checked={(itemForm.use_ids || []).includes(use.id)}
+                                onCheckedChange={(checked: boolean) => handleUseToggle(use.id, checked)}
+                              />
+                              <Label htmlFor={`use-${use.id}`} className="text-xs">
+                                {use.name} {use.source && `(${use.source})`}
+                              </Label>
+                            </div>
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    </div>
+                    
+                    <div>
+                      <Label>Tags</Label>
+                      <ScrollArea className="h-32 w-full border rounded p-2 mt-2">
+                        <div className="space-y-2">
+                          {tags.map((tag: Tag) => (
+                            <div key={tag.id} className="flex items-center space-x-2">
+                              <Checkbox
+                                id={`tag-${tag.id}`}
+                                checked={(itemForm.tag_ids || []).includes(tag.id)}
+                                onCheckedChange={(checked: boolean) => handleTagToggle(tag.id, checked)}
+                              />
+                              <Label htmlFor={`tag-${tag.id}`} className="text-xs">
+                                {tag.name}
+                              </Label>
+                            </div>
+                          ))}
+                        </div>
+                      </ScrollArea>
                     </div>
                   </div>
                   
-                  <Button type="submit" disabled={isLoading}>
-                    {isLoading ? 'Creating...' : '✨ Create Item'}
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button type="submit" disabled={isLoading}>
+                      {isLoading ? 'Saving...' : (editingItem ? '💾 Update Item' : '✨ Create Item')}
+                    </Button>
+                    {editingItem && (
+                      <Button type="button" variant="outline" onClick={resetItemForm}>
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
                 </form>
               </CardContent>
             </Card>
@@ -445,14 +770,30 @@ function App() {
                     <CardDescription>{item.description}</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    <div>
-                      <h4 className="font-semibold text-green-700">🌟 Properties</h4>
-                      <p className="text-sm text-gray-600">{item.properties}</p>
-                    </div>
-                    <div>
-                      <h4 className="font-semibold text-blue-700">💊 Uses</h4>
-                      <p className="text-sm text-gray-600">{item.uses}</p>
-                    </div>
+                    {item.properties.length > 0 && (
+                      <div>
+                        <h4 className="font-semibold text-green-700">🌟 Properties</h4>
+                        <div className="flex flex-wrap gap-1">
+                          {item.properties.map((property: Property) => (
+                            <Badge key={property.id} variant="outline" className="text-xs">
+                              {property.name} {property.source && `(${property.source})`}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {item.uses.length > 0 && (
+                      <div>
+                        <h4 className="font-semibold text-blue-700">💊 Uses</h4>
+                        <div className="flex flex-wrap gap-1">
+                          {item.uses.map((use: Use) => (
+                            <Badge key={use.id} variant="outline" className="text-xs">
+                              {use.name} {use.source && `(${use.source})`}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {item.potential_side_effects && (
                       <div>
                         <h4 className="font-semibold text-red-700">⚠️ Potential Side Effects</h4>
@@ -466,6 +807,32 @@ function App() {
                         </Badge>
                       ))}
                     </div>
+                    <div className="flex gap-2 pt-2">
+                      <Button size="sm" onClick={() => startEditItem(item)}>
+                        ✏️ Edit
+                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button size="sm" variant="destructive">
+                            🗑️ Delete
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This will permanently delete "{item.name}" and remove it from all protocols.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => handleDeleteItem(item.id)}>
+                              Delete
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
                   </CardContent>
                 </Card>
               ))}
@@ -473,13 +840,13 @@ function App() {
           </TabsContent>
 
           <TabsContent value="protocols" className="space-y-6">
-            {/* Add Protocol Form */}
+            {/* Add/Edit Protocol Form */}
             <Card>
               <CardHeader>
-                <CardTitle>➕ Create New Protocol</CardTitle>
+                <CardTitle>{editingProtocol ? '✏️ Edit Protocol' : '➕ Create New Protocol'}</CardTitle>
               </CardHeader>
               <CardContent>
-                <form onSubmit={handleCreateProtocol} className="space-y-4">
+                <form onSubmit={handleSubmitProtocol} className="space-y-4">
                   <div>
                     <Label htmlFor="protocol-name">Protocol Name</Label>
                     <Input
@@ -523,9 +890,16 @@ function App() {
                       </div>
                     </ScrollArea>
                   </div>
-                  <Button type="submit" disabled={isLoading}>
-                    {isLoading ? 'Creating...' : '📋 Create Protocol'}
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button type="submit" disabled={isLoading}>
+                      {isLoading ? 'Saving...' : (editingProtocol ? '💾 Update Protocol' : '📋 Create Protocol')}
+                    </Button>
+                    {editingProtocol && (
+                      <Button type="button" variant="outline" onClick={resetProtocolForm}>
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
                 </form>
               </CardContent>
             </Card>
@@ -554,12 +928,42 @@ function App() {
                         ))}
                       </div>
                     </div>
-                    <Button 
-                      onClick={() => loadProtocolById(protocol.id)}
-                      className="w-full"
-                    >
-                      📊 View Detailed Analysis
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button 
+                        onClick={() => loadProtocolById(protocol.id)}
+                        className="flex-1"
+                      >
+                        📊 View Analysis
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={() => startEditProtocol(protocol)}
+                      >
+                        ✏️ Edit
+                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button size="sm" variant="destructive">
+                            🗑️
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This will permanently delete the protocol "{protocol.name}".
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => handleDeleteProtocol(protocol.id)}>
+                              Delete
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
                   </CardContent>
                 </Card>
               ))}
@@ -587,9 +991,9 @@ function App() {
                           </CardHeader>
                           <CardContent>
                             <div className="flex flex-wrap gap-1">
-                              {selectedProtocol.aggregated_metadata.common_properties.map((prop: string, index: number) => (
-                                <Badge key={index} variant="outline" className="text-xs">
-                                  {prop}
+                              {selectedProtocol.aggregated_metadata.common_properties.map((property: Property) => (
+                                <Badge key={property.id} variant="outline" className="text-xs">
+                                  {property.name} {property.source && `(${property.source})`}
                                 </Badge>
                               ))}
                             </div>
@@ -602,9 +1006,9 @@ function App() {
                           </CardHeader>
                           <CardContent>
                             <div className="flex flex-wrap gap-1">
-                              {selectedProtocol.aggregated_metadata.common_uses.map((use: string, index: number) => (
-                                <Badge key={index} variant="outline" className="text-xs">
-                                  {use}
+                              {selectedProtocol.aggregated_metadata.common_uses.map((use: Use) => (
+                                <Badge key={use.id} variant="outline" className="text-xs">
+                                  {use.name} {use.source && `(${use.source})`}
                                 </Badge>
                               ))}
                             </div>
@@ -695,13 +1099,193 @@ function App() {
             )}
           </TabsContent>
 
+          <TabsContent value="properties" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>{editingProperty ? '✏️ Edit Property' : '➕ Add New Property'}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleSubmitProperty} className="space-y-4">
+                  <div>
+                    <Label htmlFor="property-name">Property Name</Label>
+                    <Input
+                      id="property-name"
+                      value={propertyForm.name}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                        setPropertyForm((prev: CreatePropertyInput) => ({ ...prev, name: e.target.value }))
+                      }
+                      required
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="property-source">Source (optional)</Label>
+                    <Input
+                      id="property-source"
+                      value={propertyForm.source || ''}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                        setPropertyForm((prev: CreatePropertyInput) => ({ 
+                          ...prev, 
+                          source: e.target.value || null 
+                        }))
+                      }
+                      placeholder="e.g., Clinical study 2023, Traditional medicine"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="submit" disabled={isLoading}>
+                      {isLoading ? 'Saving...' : (editingProperty ? '💾 Update Property' : '⚡ Create Property')}
+                    </Button>
+                    {editingProperty && (
+                      <Button type="button" variant="outline" onClick={resetPropertyForm}>
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {properties.map((property: Property) => (
+                <Card key={property.id}>
+                  <CardHeader>
+                    <CardTitle className="flex items-center justify-between">
+                      <span>⚡ {property.name}</span>
+                    </CardTitle>
+                    {property.source && (
+                      <CardDescription>Source: {property.source}</CardDescription>
+                    )}
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={() => startEditProperty(property)}>
+                        ✏️ Edit
+                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button size="sm" variant="destructive">
+                            🗑️ Delete
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This will permanently delete "{property.name}" and remove it from all items.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => handleDeleteProperty(property.id)}>
+                              Delete
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="uses" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>{editingUse ? '✏️ Edit Use' : '➕ Add New Use'}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleSubmitUse} className="space-y-4">
+                  <div>
+                    <Label htmlFor="use-name">Use Name</Label>
+                    <Input
+                      id="use-name"
+                      value={useForm.name}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                        setUseForm((prev: CreateUseInput) => ({ ...prev, name: e.target.value }))
+                      }
+                      required
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="use-source">Source (optional)</Label>
+                    <Input
+                      id="use-source"
+                      value={useForm.source || ''}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                        setUseForm((prev: CreateUseInput) => ({ 
+                          ...prev, 
+                          source: e.target.value || null 
+                        }))
+                      }
+                      placeholder="e.g., Folk medicine, Research study"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="submit" disabled={isLoading}>
+                      {isLoading ? 'Saving...' : (editingUse ? '💾 Update Use' : '💊 Create Use')}
+                    </Button>
+                    {editingUse && (
+                      <Button type="button" variant="outline" onClick={resetUseForm}>
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {uses.map((use: Use) => (
+                <Card key={use.id}>
+                  <CardHeader>
+                    <CardTitle className="flex items-center justify-between">
+                      <span>💊 {use.name}</span>
+                    </CardTitle>
+                    {use.source && (
+                      <CardDescription>Source: {use.source}</CardDescription>
+                    )}
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={() => startEditUse(use)}>
+                        ✏️ Edit
+                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button size="sm" variant="destructive">
+                            🗑️ Delete
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This will permanently delete "{use.name}" and remove it from all items.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => handleDeleteUse(use.id)}>
+                              Delete
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </TabsContent>
+
           <TabsContent value="categories" className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>➕ Add New Category</CardTitle>
+                <CardTitle>{editingCategory ? '✏️ Edit Category' : '➕ Add New Category'}</CardTitle>
               </CardHeader>
               <CardContent>
-                <form onSubmit={handleCreateCategory} className="space-y-4">
+                <form onSubmit={handleSubmitCategory} className="space-y-4">
                   <div>
                     <Label htmlFor="category-name">Category Name</Label>
                     <Input
@@ -726,9 +1310,16 @@ function App() {
                       }
                     />
                   </div>
-                  <Button type="submit" disabled={isLoading}>
-                    {isLoading ? 'Creating...' : '🏷️ Create Category'}
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button type="submit" disabled={isLoading}>
+                      {isLoading ? 'Saving...' : (editingCategory ? '💾 Update Category' : '🏷️ Create Category')}
+                    </Button>
+                    {editingCategory && (
+                      <Button type="button" variant="outline" onClick={resetCategoryForm}>
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
                 </form>
               </CardContent>
             </Card>
@@ -743,9 +1334,37 @@ function App() {
                     )}
                   </CardHeader>
                   <CardContent>
-                    <Badge variant="outline">
-                      {items.filter((item: NaturalHealingItemWithRelations) => item.category_id === category.id).length} items
-                    </Badge>
+                    <div className="flex items-center justify-between mb-2">
+                      <Badge variant="outline">
+                        {items.filter((item: NaturalHealingItemWithRelations) => item.category_id === category.id).length} items
+                      </Badge>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={() => startEditCategory(category)}>
+                        ✏️ Edit
+                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button size="sm" variant="destructive">
+                            🗑️ Delete
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This will permanently delete "{category.name}". Note: Categories with associated items cannot be deleted.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => handleDeleteCategory(category.id)}>
+                              Delete
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
                   </CardContent>
                 </Card>
               ))}
@@ -755,10 +1374,10 @@ function App() {
           <TabsContent value="tags" className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>➕ Add New Tag</CardTitle>
+                <CardTitle>{editingTag ? '✏️ Edit Tag' : '➕ Add New Tag'}</CardTitle>
               </CardHeader>
               <CardContent>
-                <form onSubmit={handleCreateTag} className="space-y-4">
+                <form onSubmit={handleSubmitTag} className="space-y-4">
                   <div>
                     <Label htmlFor="tag-name">Tag Name</Label>
                     <Input
@@ -766,14 +1385,12 @@ function App() {
                       value={tagForm.name}
                       onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                         setTagForm((prev: CreateTagInput) => ({ ...prev, name: e.target.value }))
-                      
                       }
                       required
                     />
                   </div>
                   <div>
                     <Label htmlFor="tag-description">Description</Label>
-                    
                     <Textarea
                       id="tag-description"
                       value={tagForm.description || ''}
@@ -785,9 +1402,16 @@ function App() {
                       }
                     />
                   </div>
-                  <Button type="submit" disabled={isLoading}>
-                    {isLoading ? 'Creating...' : '🔖 Create Tag'}
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button type="submit" disabled={isLoading}>
+                      {isLoading ? 'Saving...' : (editingTag ? '💾 Update Tag' : '🔖 Create Tag')}
+                    </Button>
+                    {editingTag && (
+                      <Button type="button" variant="outline" onClick={resetTagForm}>
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
                 </form>
               </CardContent>
             </Card>
@@ -802,11 +1426,39 @@ function App() {
                     )}
                   </CardHeader>
                   <CardContent>
-                    <Badge variant="outline">
-                      {items.filter((item: NaturalHealingItemWithRelations) => 
-                        item.tags.some((itemTag: Tag) => itemTag.id === tag.id)
-                      ).length} items
-                    </Badge>
+                    <div className="flex items-center justify-between mb-2">
+                      <Badge variant="outline">
+                        {items.filter((item: NaturalHealingItemWithRelations) => 
+                          item.tags.some((itemTag: Tag) => itemTag.id === tag.id)
+                        ).length} items
+                      </Badge>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={() => startEditTag(tag)}>
+                        ✏️ Edit
+                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button size="sm" variant="destructive">
+                            🗑️ Delete
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This will permanently delete "{tag.name}" and remove it from all items.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => handleDeleteTag(tag.id)}>
+                              Delete
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
                   </CardContent>
                 </Card>
               ))}

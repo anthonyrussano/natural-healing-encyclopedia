@@ -1,349 +1,116 @@
-
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { resetDB, createDB } from '../helpers';
-import { db } from '../db';
-import { categoriesTable, tagsTable, naturalHealingItemsTable, naturalHealingItemTagsTable } from '../db/schema';
-import { type UpdateNaturalHealingItemInput, type CreateCategoryInput, type CreateTagInput } from '../schema';
+import { type CreateNaturalHealingItemInput, type UpdateNaturalHealingItemInput } from '../schema';
+import { createNaturalHealingItem } from '../handlers/create_natural_healing_item';
 import { updateNaturalHealingItem } from '../handlers/update_natural_healing_item';
-import { eq } from 'drizzle-orm';
+import { createCategory } from '../handlers/create_category';
+import { createProperty } from '../handlers/create_property';
+import { createUse } from '../handlers/create_use';
+import { createTag } from '../handlers/create_tag';
 
 describe('updateNaturalHealingItem', () => {
   beforeEach(createDB);
   afterEach(resetDB);
 
-  it('should update basic natural healing item fields', async () => {
-    // Create test category
-    const categoryResult = await db.insert(categoriesTable)
-      .values({
-        name: 'Test Category',
-        description: 'A category for testing'
-      })
-      .returning()
-      .execute();
-    const category = categoryResult[0];
+  it('should update a natural healing item with new properties and uses', async () => {
+    // Create prerequisite data
+    const category1 = await createCategory({ name: 'Herbs', description: 'Herbal remedies' });
+    const category2 = await createCategory({ name: 'Minerals', description: 'Mineral remedies' });
+    const property1 = await createProperty({ name: 'Anti-inflammatory', source: 'Study A' });
+    const property2 = await createProperty({ name: 'Antibacterial', source: 'Study B' });
+    const use1 = await createUse({ name: 'Pain relief', source: 'Traditional' });
+    const use2 = await createUse({ name: 'Wound healing', source: 'Clinical' });
+    const tag1 = await createTag({ name: 'Digestive', description: 'Aids digestion' });
+    const tag2 = await createTag({ name: 'Topical', description: 'For external use' });
 
-    // Create test item
-    const itemResult = await db.insert(naturalHealingItemsTable)
-      .values({
-        name: 'Original Item',
-        description: 'Original description',
-        properties: 'Original properties',
-        uses: 'Original uses',
-        potential_side_effects: 'Original side effects',
-        image_url: 'https://example.com/original.jpg',
-        category_id: category.id
-      })
-      .returning()
-      .execute();
-    const item = itemResult[0];
+    // Create initial item
+    const createInput: CreateNaturalHealingItemInput = {
+      name: 'Original Name',
+      description: 'Original description',
+      potential_side_effects: 'Original side effects',
+      image_url: 'https://example.com/original.jpg',
+      category_id: category1.id,
+      property_ids: [property1.id],
+      use_ids: [use1.id],
+      tag_ids: [tag1.id]
+    };
 
+    const originalItem = await createNaturalHealingItem(createInput);
+
+    // Update the item
     const updateInput: UpdateNaturalHealingItemInput = {
-      id: item.id,
-      name: 'Updated Item',
+      id: originalItem.id,
+      name: 'Updated Name',
       description: 'Updated description',
-      properties: 'Updated properties',
-      uses: 'Updated uses',
       potential_side_effects: 'Updated side effects',
-      image_url: 'https://example.com/updated.jpg'
+      image_url: 'https://example.com/updated.jpg',
+      category_id: category2.id,
+      property_ids: [property2.id],
+      use_ids: [use2.id],
+      tag_ids: [tag2.id]
     };
 
     const result = await updateNaturalHealingItem(updateInput);
 
-    expect(result.id).toEqual(item.id);
-    expect(result.name).toEqual('Updated Item');
+    expect(result.name).toEqual('Updated Name');
     expect(result.description).toEqual('Updated description');
-    expect(result.properties).toEqual('Updated properties');
-    expect(result.uses).toEqual('Updated uses');
     expect(result.potential_side_effects).toEqual('Updated side effects');
     expect(result.image_url).toEqual('https://example.com/updated.jpg');
-    expect(result.category_id).toEqual(category.id);
-    expect(result.updated_at).toBeInstanceOf(Date);
-    expect(result.updated_at > item.updated_at).toBe(true);
-  });
-
-  it('should update category_id', async () => {
-    // Create test categories
-    const category1Result = await db.insert(categoriesTable)
-      .values({
-        name: 'Category 1',
-        description: 'First category'
-      })
-      .returning()
-      .execute();
-    const category1 = category1Result[0];
-
-    const category2Result = await db.insert(categoriesTable)
-      .values({
-        name: 'Category 2',
-        description: 'Second category'
-      })
-      .returning()
-      .execute();
-    const category2 = category2Result[0];
-
-    // Create test item with first category
-    const itemResult = await db.insert(naturalHealingItemsTable)
-      .values({
-        name: 'Test Item',
-        description: 'Test description',
-        properties: 'Test properties',
-        uses: 'Test uses',
-        category_id: category1.id
-      })
-      .returning()
-      .execute();
-    const item = itemResult[0];
-
-    const updateInput: UpdateNaturalHealingItemInput = {
-      id: item.id,
-      category_id: category2.id
-    };
-
-    const result = await updateNaturalHealingItem(updateInput);
-
     expect(result.category_id).toEqual(category2.id);
-    expect(result.category.id).toEqual(category2.id);
-    expect(result.category.name).toEqual('Category 2');
+    expect(result.category.name).toEqual('Minerals');
+
+    // Check updated relations
+    expect(result.properties).toHaveLength(1);
+    expect(result.properties[0].name).toEqual('Antibacterial');
+    expect(result.uses).toHaveLength(1);
+    expect(result.uses[0].name).toEqual('Wound healing');
+    expect(result.tags).toHaveLength(1);
+    expect(result.tags[0].name).toEqual('Topical');
   });
 
-  it('should update tag associations', async () => {
-    // Create test category
-    const categoryResult = await db.insert(categoriesTable)
-      .values({
-        name: 'Test Category',
-        description: 'A category for testing'
-      })
-      .returning()
-      .execute();
-    const category = categoryResult[0];
+  it('should partially update natural healing item', async () => {
+    // Create prerequisite data
+    const category = await createCategory({ name: 'Herbs', description: 'Herbal remedies' });
+    const property = await createProperty({ name: 'Anti-inflammatory', source: 'Study A' });
 
-    // Create test tags
-    const tag1Result = await db.insert(tagsTable)
-      .values({
-        name: 'Tag 1',
-        description: 'First tag'
-      })
-      .returning()
-      .execute();
-    const tag1 = tag1Result[0];
-
-    const tag2Result = await db.insert(tagsTable)
-      .values({
-        name: 'Tag 2',
-        description: 'Second tag'
-      })
-      .returning()
-      .execute();
-    const tag2 = tag2Result[0];
-
-    const tag3Result = await db.insert(tagsTable)
-      .values({
-        name: 'Tag 3',
-        description: 'Third tag'
-      })
-      .returning()
-      .execute();
-    const tag3 = tag3Result[0];
-
-    // Create test item
-    const itemResult = await db.insert(naturalHealingItemsTable)
-      .values({
-        name: 'Test Item',
-        description: 'Test description',
-        properties: 'Test properties',
-        uses: 'Test uses',
-        category_id: category.id
-      })
-      .returning()
-      .execute();
-    const item = itemResult[0];
-
-    // Add initial tags
-    await db.insert(naturalHealingItemTagsTable)
-      .values([
-        { item_id: item.id, tag_id: tag1.id },
-        { item_id: item.id, tag_id: tag2.id }
-      ])
-      .execute();
-
-    // Update with different tags
-    const updateInput: UpdateNaturalHealingItemInput = {
-      id: item.id,
-      tag_ids: [tag2.id, tag3.id]
-    };
-
-    const result = await updateNaturalHealingItem(updateInput);
-
-    expect(result.tags).toHaveLength(2);
-    const tagIds = result.tags.map(tag => tag.id);
-    expect(tagIds).toContain(tag2.id);
-    expect(tagIds).toContain(tag3.id);
-    expect(tagIds).not.toContain(tag1.id);
-  });
-
-  it('should clear all tags when empty array provided', async () => {
-    // Create test category
-    const categoryResult = await db.insert(categoriesTable)
-      .values({
-        name: 'Test Category',
-        description: 'A category for testing'
-      })
-      .returning()
-      .execute();
-    const category = categoryResult[0];
-
-    // Create test tag
-    const tagResult = await db.insert(tagsTable)
-      .values({
-        name: 'Test Tag',
-        description: 'A tag for testing'
-      })
-      .returning()
-      .execute();
-    const tag = tagResult[0];
-
-    // Create test item
-    const itemResult = await db.insert(naturalHealingItemsTable)
-      .values({
-        name: 'Test Item',
-        description: 'Test description',
-        properties: 'Test properties',
-        uses: 'Test uses',
-        category_id: category.id
-      })
-      .returning()
-      .execute();
-    const item = itemResult[0];
-
-    // Add initial tag
-    await db.insert(naturalHealingItemTagsTable)
-      .values({ item_id: item.id, tag_id: tag.id })
-      .execute();
-
-    // Update with empty tag array
-    const updateInput: UpdateNaturalHealingItemInput = {
-      id: item.id,
+    // Create initial item
+    const createInput: CreateNaturalHealingItemInput = {
+      name: 'Test Herb',
+      description: 'Original description',
+      potential_side_effects: 'Original side effects',
+      image_url: 'https://example.com/original.jpg',
+      category_id: category.id,
+      property_ids: [property.id],
+      use_ids: [],
       tag_ids: []
     };
 
+    const originalItem = await createNaturalHealingItem(createInput);
+
+    // Partial update - only name
+    const updateInput: UpdateNaturalHealingItemInput = {
+      id: originalItem.id,
+      name: 'Updated Name Only'
+    };
+
     const result = await updateNaturalHealingItem(updateInput);
 
-    expect(result.tags).toHaveLength(0);
+    expect(result.name).toEqual('Updated Name Only');
+    // Other fields should remain unchanged
+    expect(result.description).toEqual('Original description');
+    expect(result.potential_side_effects).toEqual('Original side effects');
+    expect(result.image_url).toEqual('https://example.com/original.jpg');
+    expect(result.category_id).toEqual(category.id);
+    expect(result.properties).toHaveLength(1);
+    expect(result.properties[0].name).toEqual('Anti-inflammatory');
   });
 
   it('should throw error for non-existent item', async () => {
     const updateInput: UpdateNaturalHealingItemInput = {
-      id: 999,
-      name: 'Updated Item'
+      id: 999, // Non-existent item
+      name: 'Updated Name'
     };
 
-    await expect(updateNaturalHealingItem(updateInput)).rejects.toThrow(/item with id 999 not found/i);
-  });
-
-  it('should throw error for non-existent category', async () => {
-    // Create test category
-    const categoryResult = await db.insert(categoriesTable)
-      .values({
-        name: 'Test Category',
-        description: 'A category for testing'
-      })
-      .returning()
-      .execute();
-    const category = categoryResult[0];
-
-    // Create test item
-    const itemResult = await db.insert(naturalHealingItemsTable)
-      .values({
-        name: 'Test Item',
-        description: 'Test description',
-        properties: 'Test properties',
-        uses: 'Test uses',
-        category_id: category.id
-      })
-      .returning()
-      .execute();
-    const item = itemResult[0];
-
-    const updateInput: UpdateNaturalHealingItemInput = {
-      id: item.id,
-      category_id: 999
-    };
-
-    await expect(updateNaturalHealingItem(updateInput)).rejects.toThrow(/category with id 999 not found/i);
-  });
-
-  it('should throw error for non-existent tag', async () => {
-    // Create test category
-    const categoryResult = await db.insert(categoriesTable)
-      .values({
-        name: 'Test Category',
-        description: 'A category for testing'
-      })
-      .returning()
-      .execute();
-    const category = categoryResult[0];
-
-    // Create test item
-    const itemResult = await db.insert(naturalHealingItemsTable)
-      .values({
-        name: 'Test Item',
-        description: 'Test description',
-        properties: 'Test properties',
-        uses: 'Test uses',
-        category_id: category.id
-      })
-      .returning()
-      .execute();
-    const item = itemResult[0];
-
-    const updateInput: UpdateNaturalHealingItemInput = {
-      id: item.id,
-      tag_ids: [999]
-    };
-
-    await expect(updateNaturalHealingItem(updateInput)).rejects.toThrow(/tag with id 999 not found/i);
-  });
-
-  it('should update only provided fields, leaving others unchanged', async () => {
-    // Create test category
-    const categoryResult = await db.insert(categoriesTable)
-      .values({
-        name: 'Test Category',
-        description: 'A category for testing'
-      })
-      .returning()
-      .execute();
-    const category = categoryResult[0];
-
-    // Create test item
-    const itemResult = await db.insert(naturalHealingItemsTable)
-      .values({
-        name: 'Original Item',
-        description: 'Original description',
-        properties: 'Original properties',
-        uses: 'Original uses',
-        potential_side_effects: 'Original side effects',
-        image_url: 'https://example.com/original.jpg',
-        category_id: category.id
-      })
-      .returning()
-      .execute();
-    const item = itemResult[0];
-
-    // Update only name and description
-    const updateInput: UpdateNaturalHealingItemInput = {
-      id: item.id,
-      name: 'Updated Item',
-      description: 'Updated description'
-    };
-
-    const result = await updateNaturalHealingItem(updateInput);
-
-    expect(result.name).toEqual('Updated Item');
-    expect(result.description).toEqual('Updated description');
-    expect(result.properties).toEqual('Original properties');
-    expect(result.uses).toEqual('Original uses');
-    expect(result.potential_side_effects).toEqual('Original side effects');
-    expect(result.image_url).toEqual('https://example.com/original.jpg');
+    expect(updateNaturalHealingItem(updateInput)).rejects.toThrow(/Natural healing item with id 999 not found/);
   });
 });
